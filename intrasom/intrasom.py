@@ -1,4 +1,4 @@
-# Importações externas
+# External imports
 import sys
 import tempfile
 import os
@@ -24,7 +24,7 @@ import matplotlib.gridspec as gridspec
 import matplotlib as mpl
 
 
-# Importações internas
+# Internal imports
 from .codebook import Codebook
 from .object_functions import NeighborhoodFactory, NormalizerFactory
 
@@ -49,96 +49,90 @@ class SOMFactory(object):
               pred_size=0):
         """
 
-        Constrói um objeto para treinamento de SOM, com os parâmetros de dados,
-        de mapa e de tipo de treinamento.
+         onstructs an object for SOM training, with the data parameters,
+        map features and types of training.
 
         Args:
-            data: Dados de entrada, representados por uma matriz de n linhas, como 
-                amostras ou instâncias; e m colunas, como variáveis. São aceitos os 
-                formatos dataframe ou ndarray (na escolha pelo formato ndarray, os 
-                parâmetros `component_names` e `sample_names` podem ser preenchidas).
+            data: input data, represented by an n-row matrix, as samples or instances, 
+                and m columns, as variables. The accepted formats are dataframe or ndarray 
+                (if choosing the ndarray format, the parameters `component_names` and 
+                `sample_names` can be filled).
 
+            mapsize: tuple/list defining the size of the SOM map in the format (columns, 
+                rows). If an integer is provided, it is considered as the number of neurons. 
+                For example, for a map of 144 neurons, a SOM map (12, 12) will be 
+                automatically created. For the development of periodicity in hexagonal 
+                grids, it is not possible to create SOM maps with an odd number of rows. 
+                Therefore, when choosing map sizes with an odd number of rows, the 
+                immediately lower even integer will be automatically admitted. If no 
+                number is entered, the size provided by the heuristic function defined 
+                in expected_mapsize() will be considered.
 
-            mapsize: Tupla/lista definindo o tamanho do mapa SOM no formato 
-                (colunas, linhas). Se um número inteiro é provido, ele é considerado 
-                o número de neurônios. Por exemplo, para um mapa de 144 neurônios, 
-                será criado automaticamente um mapa SOM (12, 12). Para o 
-                desenvolvimento da periodicidade das grades hexagonais não é possível 
-                a criação de mapas SOM com número ímpar de linhas. Assim, em escolhas 
-                de tamanhos de mapas com números ímpares de linhas, será admitido de 
-                forma automática o número inteiro par imediatamente inferior ao escolhido. 
-                Se nenhum número for inserido, será considerado o tamanho fornecido pela 
-                função heurística definida em `expected_mapsize()`.
+            mask: Mask for null values. Example: -9999.
 
-            mask: mascara para os os valores nulos. Exemplo: -9999
+            mapshape: Format of the SOM topology. Example: "planar" or "toroid".
 
-            mapshape: formato da topologia do som. Exemplo: "planar" ou "toroid"
+            lattice: type of lattice. Example: "hexa".
 
-            lattice: tipo de lattice. Exemplo: "hexa"
+            normalization: type of data normalization. Example: "var" or None
 
-            normalization: objeto para calculo de normalização. "var" ou "none"
+            initialization: method used for SOM initialization. Options: "pca" (only 
+                for complete datasets without NaN values; does not work with missing 
+                data) or "random".
 
-            initialization: Método utilizado para a inicialização do som. Opções: 
-                "pca" (apenas para bases de dados completas, sem NaN; não funciona com 
-                dados faltantes) ou "random"
+            neighborhood: type of neighborhood calculation. Example: "gaussian"
 
-            neighborhood: objeto para cálculo de vizinhança.  Exemplot: "gaussian"
+            training: type of neighborhood calculation. Example: "gaussian"
 
-            training: modo de Treinamento. Opções: "batch"
+            name: name used to identify the SOM object or project. The chosen 
+                name will be used to name the saved files at the end of training 
+                and in other functions of the library.
 
-            name: nome utilizado para identificar o objeto som, irá nomear o
-                arquivo salvo ao fim do treinamento.
+            component_names: list of labels for the variables used in training. 
+                If not provided, a list will be automatically created in the 
+                format: [Variable 1, Variable 2, ...].
 
-            component_names: lista com os rótulos das variáveis usadas no
-                treinamento. Caso não seja fornecido, será criada
-                automaticamente uma lista no formato:
-                [Variável 1, Variável 2,...].
+            unit_names: list of labels associated with the units of the training 
+                variables. If not provided, a unit list will be automatically created 
+                in the style: [Unit , Unit , ...].
 
-            unit_names: lista com os rótulos associados as unidades das
-                variáveis de treinamento. Caso não seja fornecido, será criado
-                automaticamente uma lista de unidades no estilo:
-                [Unidade <variável1>, Unidade <variável2>,...].
+            sample_names: List with the names of the samples. If not provided, a 
+                list will be automatically created in the format: [Sample 1, 
+                Sample 2, ...].
 
-            sample_names: lista com o nome das amostras. Caso não seja
-                fornecida, será criada automaticamente um lista no formato:
-                [Amostra 1, Amostra 2,...].
+            missing: boolean value that should be filled if the database has missing 
+                values (NaN). For training of the "Bruto" type, a search for the BMUs 
+                (Best Matching Units) is performed using a distance calculation function 
+                with missing data, and the codebook update is done by filling the missing 
+                data with 0. In the fine-tuning step, this process is repeated if the 
+                parameter "previous_epoch" is set to False, or there is a substitution 
+                of the empty values with the calculated values for those cells 
+                in the previous training epoch if the parameter "previous_epoch" is 
+                set to True. In order to allow freedom of movement for vectors with 
+                missing data across the Kohonen map, a random regularization factor 
+                is generated for this filling. This factor decays during training 
+                based on the decay of the search radius for BMU updates. This factor 
+                can be observed along with the quantization error and the search 
+                radius in the training progress bar.
 
-            missing: Valor booleano que deverá ser preenchido caso o banco de
-                dados tenha valores faltantes (NaN). Para o treinamento do tipo
-                Bruto ocorre uma procura pelos BMU utilizando uma função de
-                calculo de distâncias com dados faltantes e a atualização do 
-                codebook é feita com o preenchimento dos dados faltantes por 0.
-                Na etapa de ajuste fino esse processo é repetido caso o parâmetro
-                previous_epoch esteja sinalizado como Falso, ou há uma substituição
-                dos valores vazios pelos valores calculados para essas células na
-                época anterior de treinamento caso o parâmetro previous_epoch tenha
-                sido sinalizado como Verdadeiro.Para que haja liberdade de 
-                deslocamento dos vetores com dados faltantes ao longo do mapa 
-                Kohonen, um fator aleatório de regularização sobre esse preenchimento 
-                é gerado. Esse fator decai ao longo do treinamento em função do 
-                decaimento do raio de busca para atualização de bmus. Esse fator 
-                pode ser observado juntamente com a quantização do erro e o raio de 
-                busca na barra iterativa de treinamento.
+            pred_size: for semi-supervised training of databases, it is recommended 
+                to place the training label columns in the last positions of the 
+                DataFrame. Please indicate here the number of labeled columns so 
+                that the project_nan_data() projection function can be used with 
+                unlabeled data.
 
-            pred_size: para o treinamento semi-supervisionado de bases de dados,
-                se indica a colocação das colunas de rótulos de treinamento nas
-                últimas posições do DataFrame e se indique aqui qual a
-                quantidade das colunas rotuladas, para que a utilização da
-                função de projeção project_nan_data() possa ser utilizada com
-                dados não rotulados.
-
-        Retorna:
-            Objeto SOM com todos os seus métodos e atributos herdados.
+        Returns:
+            SOM object with all its inherited methods and attributes.
 
         """
-        # Aplicar a normalização caso essa esteja definida
+        # Apply normalization if it is defined
         if normalization:
             normalizer = NormalizerFactory.build(normalization)
         else:
             normalizer = None
 
-        # Construir o objeto de calculo de vizinhança de acordo com a função de
-        # vizinhança especificada
+        # Build the neighborhood calculation object according to the function of
+        # specified neighborhood
         neigh_calc = NeighborhoodFactory.build(neighborhood)
 
         return SOM(data = data,
@@ -164,27 +158,24 @@ class SOMFactory(object):
              trained_neurons,
              params):
         """
-        Função para carregamento de dados treinados. Necessário o acesso aos
-        dataframes de entrada, dos neurônios treinados, assim como o arquivo de
-        parâmetros salvo na finalização do processo de treinamento. Como
-        demonstrado no notebook de exemplo de uso do código.
-
+        Function for loading trained data. It requires access to the input dataframes,
+        the trained neuron dataframe, as well as the parameter file saved at the 
+        end of the training process, as demonstrated in the example notebook.
+        
         Args:
-            data: dados de entrada, representados por uma matriz de n linhas e
-                m colunas como variáveis. Aceita o formato dataframe ou ndarray
-                (caso seja ndarray as variáveis component_names e sample_names
-                podem ser preenchidas).
+            data: Input data, represented by an n-row and m-column matrix as 
+                variables. Accepts dataframe or ndarray format. If ndarray is 
+                used, the component_names and sample_names variables can be filled.
 
-            trained_neurons: o dataframe de neurônios treinados que é gerado ao fim 
-                do treinamento SOM.
+            trained_neurons: The dataframe of trained neurons generated at the end 
+                of SOM training.
 
-            params: JSON de parâmetros gerado ao fim do treinamento SOM.
+            params: JSON parameters generated at the end of SOM training.
 
-        Retorna:
-            Objeto SOM treinado e com todos os seus métodos e atributos
-                herdados.
+        Returns:
+            Trained SOM object with all its inherited methods and attributes.
         """
-        print("Carregando dados...")
+        print("Loading data...")
         normalization = params["normalization"]
         if normalization:
             normalizer = NormalizerFactory.build(normalization)
@@ -255,11 +246,11 @@ class SOM(object):
                  trained_neurons=None, 
                  bmus = None):
 
-        # Mascara para valores faltantes
+        # Mask for missing values
         self.mask = mask
 
-        # Checar tipo de entrada e preencher os atributos internos
-        print("Carregando dataframe")
+        # Check input type and fill in internal attributes
+        print("Loading dataframe...")
         if isinstance(data, pd.DataFrame):
             self.data_raw = data.values
             if missing:
@@ -275,15 +266,15 @@ class SOM(object):
             self._data = normalizer.normalize(self.data_raw) if normalizer else self.data_raw
             self._component_names = np.array(component_names) if component_names else np.array([f"Var_{i}" for i in range(1,data.shape[1]+1)])
             if data.shape[0] < 10000:
-                self._sample_names = np.array(sample_names) if sample_names else np.array([f"Amostra_{i}" for i in range(1,data.shape[0]+1)])
+                self._sample_names = np.array(sample_names) if sample_names else np.array([f"Sample_{i}" for i in range(1,data.shape[0]+1)])
             else:
                 self._sample_names = np.array(sample_names) if sample_names else np.array([f"{i}" for i in range(1,data.shape[0]+1)])
         else:
-            print("É aceito somente os tipos DataFrame ou Ndarray como\
-             entradas para o IntraSOM")
+            print("Only DataFrame or ndarray types are accepted as\
+             IntraSOM inputs")
 
-        # Preencher os atributos não dependentes de tipo
-        print("Normalizando")
+        # Populate non-type dependent attributes
+        print("Normalizing data...")
         self._normalizer = normalizer
         self._normalization = normalization
         self._dim = data.shape[1]
@@ -293,18 +284,18 @@ class SOM(object):
         self.missing = missing
         if self.missing == False:
             if np.isnan(self._data).any():
-                sys.exit("Base com dados faltantes, sinalizar na variável missing")
-        print("Criando vizinhança")
+                sys.exit("Database with missing data, flag in missing parameter")
+        print("Creating neighborhood...")
         self.neighborhood = neighborhood
-        self._unit_names = unit_names if unit_names else [f"Unidade {var}" for var in self._component_names]
+        self._unit_names = unit_names if unit_names else [f"Unit {var}" for var in self._component_names]
         self.mapshape = mapshape
         self.initialization = initialization
         
         if mapsize:
             if mapsize[1]%2!=0:
                 self.mapsize = (mapsize[0], mapsize[1]+1)
-                print(f"O número de linhas não pode ser ímpar.\
-                O tamanho do mapa foi modificado para: {self.mapsize}")
+                print(f"The number of lines cannot be odd.\
+                The map size has been changed to: {self.mapsize}")
             else:
                 self.mapsize = mapsize
         else:
@@ -318,22 +309,22 @@ class SOM(object):
             self.nan_value_hist = []
         self.data_proj_norm = []
 
-        # Preencher atributos dependentes do tipo de carregamento
+        # Populate load type dependent attributes
         if load_param:
-            print("Criando banco de dados faltantes")
+            print("Creating missing data database")
             self.data_missing = {"indices":tuple(zip(*np.argwhere(np.isnan(self._data)))), 
                                  "nan_values":missing_imput}
             # Modificar nome
             self.name = self.name+"_loaded"
             # Alocando os bmus
             self._bmu = bmus
-            print("Criando codebook...")
+            print("Creating codebook...")
             self.codebook = Codebook(self.mapsize, self.lattice, self.mapshape)
             self.codebook.matrix = self._normalizer.normalize_by(self.data_raw, trained_neurons.iloc[:,7:].values)
             
             try:
-                print("Carregando matriz de distâncias...")
-                self._distance_matrix = np.load("Resultados/distance_matrix.npy")
+                print("Loading distances matrix...")
+                self._distance_matrix = np.load("Results/distance_matrix.npy")
                 if self.mapsize[0]*self.mapsize[1] != self._distance_matrix.shape[0]:
                     self._distance_matrix = self.calculate_map_dist
             except:
@@ -344,19 +335,18 @@ class SOM(object):
             self._bmu = np.zeros((2,self._dlen))
             self.codebook = Codebook(self.mapsize, self.lattice, self.mapshape)
             try:
-                self._distance_matrix = np.load("Resultados/distance_matrix.npy")
+                self._distance_matrix = np.load("Results/distance_matrix.npy")
                 if self.mapsize[0]*self.mapsize[1] != self._distance_matrix.shape[0]:
                     self._distance_matrix = self.calculate_map_dist
             except:
                 self._distance_matrix = self.calculate_map_dist
 
-    # PROPRIEDADES DE CLASSE
+    # CLASS PROPERTIES
     
     @property
     def get_data(self):
         """
-        Função de propriedade de classe para retornar uma cópia dos dados de 
-        entrada com os dados faltantes.
+        Class property function to return a copy of the input data with the missing data.
         """
         if self.missing:
             self._data[self.data_missing["indices"]] = np.nan
@@ -367,8 +357,8 @@ class SOM(object):
     @property
     def params_json(self):
         """
-        Função de propriedade de classe parar gerar um arquivo JSON com os
-        parâmetros de treinamento.
+        Class property function to generate a csv file with the
+        training parameters.
         """
         def fix_serialize(obj):
             if isinstance(obj, dict):
@@ -381,7 +371,8 @@ class SOM(object):
                 return int(obj)
             else:
                 return obj
-        # Criar o dicionário de propriedades de treinamento
+            
+        # Create the training properties dictionary
         dic = dict()
         dic["mapsize"] = self.mapsize
         if self.mask is not None:
@@ -409,45 +400,45 @@ class SOM(object):
             dic["bmus_dist"] = np.sqrt(self._bmu[1] + fixed_euclidean_x2).tolist()
             
         
-        # Arrumar problemas de serialização
+        # Fix serialization problems
         dic = fix_serialize(dic)
 
-        # Transformar em JSON
+        # Transform to JSON
         json_params = json.dumps(dic)
 
-        # Salvar o resultado dentro do diretório especificado
-        f = open(f"Resultados/params_{self.name}.json","w")
+        # Save the result into the specified directory
+        f = open(f"Results/params_{self.name}.json","w")
         f.write(json_params)
         f.close()
 
     @property
     def component_names(self):
         """
-        Retornar os nomes das variáveis.
+        Return variable names.
         """
         return self._component_names
 
     @property  
     def calculate_map_dist(self):
         """
-        Calcula as distâncias do grid, que serão usadas durante as etapas de
-        treinamento e as retorna no formato de uma matriz de distâncias internas
-        do grid.
+        Calculates the grid distances, which will be used during the training
+        steps and returns them in the form of an array of internal distances
+        from the grid.
         """
         blen = 50
         
-        # Capturar o número de neurons de treinamento
+        # Capture the number of training neurons
         nnodes = self.codebook.nnodes
 
-        # Cria uma matriz de zeros no formato nnós x nnós
+        # Create a matrix of zeros in the format nnodes x nnodes
         distance_matrix = np.zeros((nnodes, nnodes))
         
-        # Itera sobre os nós e preenche a matriz de distância para cada nó,
-        # através da função grid_dist
-        print("Inicializando mapa...")
+        # Iterates over the nodes and fills the distance matrix for each node,
+        # through the grid_dist function
+        print("Initializing map...")
         
         """
-        # Acelerar o codigo com processamento paralelo
+        # Speed ​​up code with parallel processing
         def chunk_distmat_fill(nodes):
             for i in tqdm(nodes, desc="Matriz\
                 de distâncias", unit=" Neurons"):
@@ -457,7 +448,6 @@ class SOM(object):
                 del dist
         """
 
-        
         for i in tqdm(range(nnodes), desc="Matriz\
             de distâncias", unit=" Neurons"):
             dist = self.codebook.grid_dist(i)
@@ -465,11 +455,11 @@ class SOM(object):
             distance_matrix[i,i:] = dist[i:]
             del dist
         
-        # Criar diretórios se não existirem
-        path = 'Resultados'
+        # Create directories if they don't exist
+        path = 'Results'
         os.makedirs(path, exist_ok=True)
-        # Salvar para que esse processo seja feito somente 1x
-        np.save('Resultados/distance_matrix.npy', distance_matrix) 
+        # Save so that this process is done only 1x
+        np.save('Results/distance_matrix.npy', distance_matrix) 
 
         return distance_matrix
 
@@ -478,12 +468,14 @@ class SOM(object):
         """
         Retorna a matriz de neurônios denormalizada. No formato de array com os
         valores dos vetores de cada neurônio.
+        Returns the denormalized matrix of neuronss. In array format with the
+        vector values ​​of each neuron.
         """
-        # Diferenciar a forma de carregar caso se trate de um carregamento de
-        # dados treinados
+        # Differentiate the way of loading if it is a loading of
+        # trained data  
         norm_neurons = self._normalizer.denormalize_by(self.data_raw, self.codebook.matrix)
 
-        # Set a threshold for values near zero
+        # Set a threshold for values ​​near zero
         threshold = 1e-6
 
         # Transform values near zero to zero
@@ -494,28 +486,28 @@ class SOM(object):
     @property
     def neurons_dataframe(self):
         """
-        Função para criar um dataframe dos pesos dos neurônios resultantes do treinamento. São
-        retornados no formado de um DataFrame dos neurônios e suas coordenadas
-        retangulares e cúbicas.
+        Function to create a dataframe of the weights of neurons resulting from training. Returned
+        in the form of a DataFrame of the BMU and their rectangular
+        and cubic coordinates.
         """
 
-        # Criar dataframe
+        # Create dataframe
         neuron_df = pd.DataFrame(np.round(self.neuron_matrix,6),
                         index = list(range(1, self.neuron_matrix.shape[0]+1)),
                         columns=[f"B_{var}" for var in self._component_names])
 
-        # Captar o número de colunas e linhas do mapa criado
+        # Capture the number of columns and lines of the created map
         rows = self.mapsize[1]
         cols = self.mapsize[0]
 
-        # Criar Coordenadas retangulares e cúbicas
+        # Create rectangular and cubic coordinates
         rec_coordinates = self._generate_rec_lattice(cols, rows)
         cub_coordinates = self._generate_oddr_cube_lattice(cols, rows)
         
-        # Escala
+        # Scaling
         min_max_scaler = preprocessing.MinMaxScaler(feature_range=(0,1))
 
-        # Criar colunas
+        # Create columns
         neuron_df.insert(0, "Cub_z", cub_coordinates[:,2])
         neuron_df.insert(0, "Cub_y", cub_coordinates[:,1])
         neuron_df.insert(0, "Cub_x", cub_coordinates[:,0])
@@ -536,22 +528,22 @@ class SOM(object):
     @property
     def results_dataframe(self):
         """
-        Função para criar um dataframe com os BMUS e seus valores associados a
-        cada vetor de entrada.
+        Function to create a dataframe with the BMU and the associated values to
+        each input vector.
         """
-        # Resgatar o dataframe de bmus
+        # Rescue the neuron dataframe
         bmu_df = self.neurons_dataframe
         bmus = self._bmu[0].astype(int)
 
         results_df = bmu_df.iloc[bmus,:]
 
-        # Inserir o erro de quantização para cada vetor
+        # Enter the quantization error for each vector
         results_df.insert(1, "q-error", self.calculate_quantization_error_expanded)
 
-        # Mudar index com o nome das amostras
+        # Change index with the sample names
         results_df.set_index(self._sample_names, inplace=True)
 
-        # Regularizar o tipo de dado
+        # Regularize the data type
         return results_df.astype({"BMU": int,
                                    "Ret_x": int,
                                    "Ret_y": int,
@@ -564,10 +556,10 @@ class SOM(object):
     @property
     def training_summary(self):
         """
-        Função para criar um sumário do treinamento e salvar no formato .txt.
+        Function to create a training summary and save it in .txt format.
         """
 
-        # Dicionário para tornar os termos mais explicativos
+        # Dictionary to make the terms more explanatory
         dic_params={
             "var":"Variance",
             "toroid":"Toroid",
@@ -577,11 +569,11 @@ class SOM(object):
             True:"Yes"
         }
 
-        # Abrir um arquivo de texto
+        # Open a text file
         text_file = open(f"Intrasom_report_{self.name}.txt", mode="w", encoding='utf-8')
 
-        # Escrever as linhas de texto
-        # Variáveis de projeto
+        # Write the lines of text
+        # Project variables
         text_file.write(f'IntraSOM Training Report\n')
         text_file.write(f'Project: {self.name}\n')
         text_file.write(f"\n")
@@ -595,7 +587,7 @@ class SOM(object):
         text_file.write(50*"-")
         text_file.write(f"\n")
 
-        # Parâmetros de inicialização
+        # Initialization Parameters
         text_file.write(f"Initialization Parameters:\n")
         text_file.write(f"\n")
         text_file.write(f"Map Size: {self.mapsize[0]} columns and {self.mapsize[1]} lines\n")
@@ -616,7 +608,7 @@ class SOM(object):
         text_file.write(50*"-")
         text_file.write(f"\n")
 
-        # Parâmetros de treinamento
+        # Training Parameters
         text_file.write(f"Training Parameters:\n")
         text_file.write(f"\n")
         text_file.write(f"Brute Training:\n")
@@ -632,7 +624,7 @@ class SOM(object):
         text_file.write(50*"-")
         text_file.write(f"\n")
 
-        # Parâmetros de qualidade de treinamento
+        # Training Quality Parameters
         text_file.write(f"Training Evaluation:\n")
         text_file.write(f"\n")
         text_file.write(f"Quantization Error: {round(self.calculate_quantization_error, 4)}\n")
@@ -641,22 +633,22 @@ class SOM(object):
         print("Training Report Created")
 
 
-    # MÉTODOS DE CLASSE
+    # CLASS METHODS
     def imput_missing(self, save=True, round_values=False):
         """
-        Retorna os dados com os valores imputados nas células de entrada vazias.
+        Returns data with imputed values ​​in empty input cells.
 
         Args:
-            save: valor booleano para indicar se o arquivo criado será ou não
-            salvo dentro do diretório [Imputação].
+            save: boolean value to indicate if the created file will be saved or not
+            saved inside the [Imputation] directory.
 
-        Retorna:
-            DataFrame com dos dados de entrada com celulas vazias imputadas
-                pelos seus respectivos BMU.
+        Returns:
+            DataFrame with input data with imputed empty cells
+                by their respective BMU.
         """
         def minimum_decimal_places(array):
             """
-            Função para descobrir o número de casas decimais em cada coluna de um array.
+            Function to find the number of decimal places in each column of an array.
             """
             min_decimal_places = np.inf * np.ones(array.shape[1], dtype=int)
 
@@ -676,41 +668,41 @@ class SOM(object):
 
             return min_decimal_places.astype(int)-1
         
-        # Captar os dados
+        # Capture the data
         data = self.get_data
         data_folder = tempfile.mkdtemp()
         data_name = os.path.join(data_folder, 'data')
         dump(data, data_name)
         data = load(data_name, mmap_mode='r+')
 
-        # Preencher
+        # Fill in
         data[self.data_missing["indices"]] = self.data_missing["nan_values"]
 
-        # Denormalizar
+        # Denormalize
         data = self._normalizer.denormalize_by(self.data_raw, data)
         if round_values:
-            # Arredondar para o mínimo de casas decimais de cada coluna de treinamento
+            # Round to the minimum of decimal places of each training column
             min_dec = minimum_decimal_places(self.data_raw)
 
-            # Iterate over each column and round the values with the corresponding decimal
+            # Iterate over each column and round the values ​​with the corresponding decimal
             for i in range(data.shape[1]):
                 data[:, i] = np.round(data[:, i], min_dec[i])
         else:
             data = np.round(data, decimals=6)
 
-        # Substituir os -0 po 0
+        # Replace the -0 with 0
         data = np.where((data == -0) | (data == -0.0), 0, data)
 
-        # Criar dataframe
+        # Create dataframe
         imput_df = pd.DataFrame(data, columns = self._component_names, index = self._sample_names)
         if save:
-            # Criar diretórios se não existirem
-            path = 'Imputação'
+            # Create directories if they don't exist
+            path = 'Imputation'
             os.makedirs(path, exist_ok=True)
             
-            # Salvar
-            imput_df.to_excel("Imputação/Dados_imputados.xlsx")
-            imput_df.to_csv("Imputação/Dados_imputados.csv")
+            # Save
+            imput_df.to_excel(f"Imputation/Imputed_data_{self.name}.xlsx")
+            imput_df.to_csv(f"Imputation/Imputed_data_{self.name}.csv")
 
         return imput_df
 
@@ -720,40 +712,33 @@ class SOM(object):
                         sample_names=None,
                         save = True):
         """
-        Função para projetar dados novos no modelo treinado, mesmo na presença 
-        de valores faltantes.
+        Function to project new data into the trained model, even if these
+        data has missing values.
 
         Args:
-            data_proj: Dados se deseja projetar no modelo. Podem estar no
-                formato DataFrame ou numpy ndarray.
+            data_proj: Data that you want to project into the model. It may be in
+                DataFrame or numpy ndarray format.
 
-            with_labels: Valor booleano para indicar se os dados tem as colunas
-                de rotulos (modelo de classificação semi-supervisionada) ou não.
-                Caso sinalizado como verdadeiro, irá considerar o número de colunas
-                especificado em pred_size definido na criação do objeto SOM como
-                as colunas de rótulos.
-            
-            save: Valor booleano para indicar o salvamento dos dados projetados,
-                esses dados serão salvos no diretório "Projecoes" criado automaticamente.
+            with_labels: Boolean value to indicate if the data has the columns
+                of labels (semi-supervised classification model) or not.
 
         Returns:
-            DataFrame com os BMUs representantes de cada vetor de entrada 
-            projetado no mapa treinado.
+            DataFrame with the BMU representing each input vector.
         """
         
-        # Checar formatos para adptação
+        # Check formats for adaptation
         if isinstance(data_proj, pd.DataFrame):
             sample_names = sample_names if sample_names is not None else data_proj.index.values
             data_proj = data_proj.values
         elif isinstance(data_proj, np.ndarray):
             data_proj = data_proj
-            sample_names = sample_names if sample_names is not None else [f"Amostra_proj_{i}" for i in range(1,data_proj.shape[0]+1)]
+            sample_names = sample_names if sample_names is not None else [f"Sample_proj_{i}" for i in range(1,data_proj.shape[0]+1)]
         else:
-            print("Somente os formatos DataFrame e Ndarray são aceitos como entrada")
+            print("Only DataFrame and ndarray formats are accepted as input")
 
-        # Checar presença de rótulos de treinamento nos dados a serem projetados
+        # Check for the presence of training labels in the data to be projected
         if with_labels:
-            # Retirar as variaveis label dos dados
+            # Remove the label variables from the data
             data_proj = data_proj[:, :- self.pred_size]
             data_proj = self._normalizer.normalize_by(self.data_raw,
                                                       data_proj,
@@ -768,14 +753,14 @@ class SOM(object):
 
         self.data_proj_norm = data_proj
 
-        # Encontrar o BMU para esses novos dados
+        # Find the BMU for this new data
         bmus = self._find_bmu(data_proj, project=True)
         bmus_ind = bmus[0].astype(int)
 
-        # Resgatar o dataframe de bmus
+        # Rescue the BMU dataframe
         bmu_df = self.neurons_dataframe
 
-        # Criar dataframe para projecao
+        # Create dataframe for projection
         projected_df = bmu_df.iloc[bmus_ind,:]
 
         projected_df.set_index(np.array(sample_names), inplace=True)
@@ -787,24 +772,24 @@ class SOM(object):
                                             "Cub_y": int,
                                             "Cub_z": int
                                            })
-        # Salvar
+        # Save
         if save:
-            # Criar pasta de resultados
+            # Create results folder
             try:
-                os.mkdir("Projecoes")
+                os.mkdir("Projected")
             except:
                 pass
 
-            # Salvar
-            projected_df.to_excel("Projecoes/Dados_projetados.xlsx")
-            projected_df.to_csv("Projecoes/Dados_projetados.csv")
+            # Save
+            projected_df.to_excel(f"Projected/Projected_data_{self.name}.xlsx")
+            projected_df.to_csv(f"Projected/Projected_data_{self.name}.csv")
 
         return projected_df
 
     def denorm_data(self, data):
         """
-        Método de classe para denormalizar dados de acordo com a normalização
-        feita para os dados de entrada.
+        Class method to denormalize data according to normalization
+        made for the input data.
         """
         data_denorm = self._normalizer.denormalize_by(self.data_raw, data)
 
@@ -830,40 +815,40 @@ class SOM(object):
               history_plot = False,
               previous_epoch = False):
         """
-        Método de classe para treinamento do objeto SOM.
+        Class method for training the SOM object.
 
         Args:
-            n_job: número de trabalhos para usar e paralelizar o treinamento.
+            n_job: number of jobs to use and parallelize training.
 
-            shared_memory: bandeira para ativar a memória compartilhada.
+            shared_memory: flag to enable shared memory.
 
-            train_rough_len: Numero de iterações durante o treinamento bruto.
+            train_rough_len: number of iterations during rough training.
 
-            train_rough_radiusin: Raio inicial de busca de BMUs durante o
-                treinamento bruto.
+            train_rough_radiusin: initial BMU fetching radius during
+                rough training.
 
-            train_rough_radiusfin: Raio final de busca de BMUs durante o
-                treinamento bruto.
+            train_rough_radiusfin: BMU search final radius during
+                rough training.
 
-            train_finetune_len: Número de iterações durante o treinamento fino.
+            train_finetune_len: number of iterations during fine training.
 
-            train_finetune_radiusin: Raio inicial de busca de BMUs durante o
-                treinamento fino.
+            train_finetune_radiusin: initial BMU scan radius during
+                fine training.
 
-            train_finetune_radiusfin: Raio final de busca de BMUs durante o
-                treinamento fino.
+            train_finetune_radiusfin: BMU search final radius during
+                fine training.
 
-            train_len_factor: Fator que multiplica os valores de extensão do
-                treinamento (rought, fine, etc)
+            train_len_factor: factor that multiplies the values ​​of the training
+                extension (rough, fine, etc)
 
-            maxtrainlen: Valor máximo de interações desejado.
-                Default: np.Inf (infinito).
+            maxtrainlen: maximum value of desired interactions.
+                Default: np.Inf (infinity).
 
-        Retorna:
-            Objeto som treinado segundo os parâmetros escolhidos.
+        Returns:
+            SOM object trained according to the chosen parameters.
 
         """
-        # Criar atributos de classe relacionados ao Treinamento
+        # Create training-related class attributes
         self.train_rough_len = train_rough_len
         self.train_rough_radiusin = train_rough_radiusin
         self.train_rough_radiusfin = train_rough_radiusfin
@@ -879,16 +864,16 @@ class SOM(object):
         self.bootstrap_proportion = bootstrap_proportion
         self.previous_epoch = previous_epoch
 
-        print("Iniciando Treinamento")
+        print("Starting Training...")
 
-        # Aplicar o tipo de inicialização escolhida
+        # Apply the chosen startup type
         if self.missing:
             if self.load_param:
                 self.codebook.pretrain()
             elif self.initialization == 'random':
                 self.codebook.random_initialization(self.get_data)
             elif self.initialization == 'pca':
-                print("Ainda não implementado")
+                print("Not implemented yet")
         else:
             if self.load_param:
                 self.codebook.pretrain()
@@ -897,10 +882,10 @@ class SOM(object):
             elif self.initialization == 'pca':
                 self.codebook.pca_linear_initialization(self.get_data)
 
-        # Aplicar o tipo de treinamento escolhido
+        # Apply the chosen training type
         if self.training == 'batch':
-            print("Treinamento Bruto:")
-            self.actual_train = "Bruto"
+            print("Rough Training:")
+            self.actual_train = "Rough"
             self.rough_train(njob=n_job,
                              shared_memory=shared_memory,
                              trainlen=train_rough_len,
@@ -909,8 +894,8 @@ class SOM(object):
                              train_len_factor=train_len_factor,
                              maxtrainlen=maxtrainlen)
             
-            print("Ajuste Fino:")
-            self.actual_train = "Fino"
+            print("Fine Tuning:")
+            self.actual_train = "Fine"
             self.finetune_train(njob=n_job,
                                 shared_memory=shared_memory,
                                 trainlen=train_finetune_len,
@@ -921,58 +906,58 @@ class SOM(object):
             
             
             if self.save:
-                print("Salvando...")
+                print("Saving...")
 
-                # Criar diretórios se não existirem
-                path = 'Resultados'
+                # Create directories if they don't exist
+                path = 'Results'
                 os.makedirs(path, exist_ok=True)
 
-                # Salvar os resultados
+                # Save the results
                 if dtypes == "xlsx_csv":
-                    self.results_dataframe.to_excel(f"Resultados/{self.name}_resultados.xlsx")
-                    self.neurons_dataframe.to_excel(f"Resultados/{self.name}_neurons.xlsx")
-                    self.results_dataframe.to_csv(f"Resultados/{self.name}_resultados.csv")
-                    self.neurons_dataframe.to_csv(f"Resultados/{self.name}_neurons.csv")
+                    self.results_dataframe.to_excel(f"Results/{self.name}_results.xlsx")
+                    self.neurons_dataframe.to_excel(f"Results/{self.name}_neurons.xlsx")
+                    self.results_dataframe.to_csv(f"Results/{self.name}_results.csv")
+                    self.neurons_dataframe.to_csv(f"Results/{self.name}_neurons.csv")
                 elif dtypes == "xlsx":
-                    self.results_dataframe.to_excel(f"Resultados/{self.name}_resultados.xlsx")
-                    self.neurons_dataframe.to_excel(f"Resultados/{self.name}_neurons.xlsx")
+                    self.results_dataframe.to_excel(f"Results/{self.name}_results.xlsx")
+                    self.neurons_dataframe.to_excel(f"Results/{self.name}_neurons.xlsx")
                 elif dtypes == "csv":
-                    self.results_dataframe.to_csv(f"Resultados/{self.name}_resultados.csv")
-                    self.neurons_dataframe.to_csv(f"Resultados/{self.name}_neurons.csv")
+                    self.results_dataframe.to_csv(f"Results/{self.name}_results.csv")
+                    self.neurons_dataframe.to_csv(f"Results/{self.name}_neurons.csv")
                 elif dtypes == "parquet":
-                    self.results_dataframe.to_parquet(f"Resultados/{self.name}_resultados.parquet")
-                    self.neurons_dataframe.to_parquet(f"Resultados/{self.name}_neurons.parquet")
+                    self.results_dataframe.to_parquet(f"Results/{self.name}_results.parquet")
+                    self.neurons_dataframe.to_parquet(f"Results/{self.name}_neurons.parquet")
                 else:
-                    print("Tipo de salvamento escolhido está incorreto.")
+                    print("Chosen save type is incorrect.")
             if self.summary:
                 self.training_summary
 
-            #Criar json de parâmetros de treinamento
+            # Create json for training parameters
             self.params_json
 
-            print("Treinamento finalizado com sucesso.")
+            print("Training completed successfully.")
 
         elif self.training == 'seq':
-            print("Ainda não implementado")
+            print("Not implemented yet")
         else:
-            print("O tipo de treinamento escolhido não está na lista aceitável: 'batch' ou 'seq'")
+            print("The chosen training type is not in the acceptable list: 'batch' or 'seq'")
 
     def _calculate_ms_and_mpd(self):
         """
-        Função para calcular o mpd e o ms. O mpd=neurônios/dados que segundo
-        Vesanto (2000) são de 10 x mpd para o treinamento bruto e 40 x mpd para
-        o treinamento de ajuste fino. Entretanto esses fatores serão
-        considerados 20x e 60x para justificar a convergência de dados
-        faltantes. Esses valores ainda não foram testados e podem ser
-        otimizados no futuro.
+        Function to calculate mpd and ms. The mpd=neurons/data that according to
+        Vesanto (2000) is 10 x mpd for rough training and 40 x mpd for
+        fine-tuning training. However, these factors will be
+        considered 20x and 60x to justify data convergence
+        missing. These values ​​have not yet been tested and may be
+        optimized in the future.
 
-        mpd = numero de nós do mapa kohonen dividido pelo número de amostras de
-            entrada (linhas de dados)
-        ms = maior dimensão do mapa kohonen
+        mpd = number of nodes of the Kohonen map divided by the number of samples of
+            input (data lines)
+        ms = largest dimension of the Kohonen map
         """
 
-        mn = np.min(self.codebook.mapsize)  # Menor dimensão do mapa
-        max_s = max(self.codebook.mapsize[0], self.codebook.mapsize[1])  # Maior dimensão do mapa
+        mn = np.min(self.codebook.mapsize)   # Smallest map size
+        max_s = max(self.codebook.mapsize[0], self.codebook.mapsize[1])  # Largest map size
 
         if mn == 1:
             mpd = float(self.codebook.nnodes * 10) / float(self._dlen)
@@ -991,36 +976,36 @@ class SOM(object):
                     train_len_factor=1,
                     maxtrainlen=1000):
         """
-        Método para implementação do treinamento bruto do objeto SOM.
+        Method for implementing the rough training of the SOM object.
 
         Args:
-            njob: número de trabalhos em paralelo.
+            njob: number of jobs in parallel.
 
-            shared_memory: uso de memória compartilhada.
+            shared_memory: shared memory usage.
 
-            trainlen: número de iterações do treinamento bruto. Caso não seja
-                preenchida será calculado o valor definido por:
-                20x mpd (neurônios/dados).
+            trainlen: number of rough training iterations. If not
+                filled in, the value defined by:
+                20x mpd (neurons/data).
 
-            radiusin: Raio inicial do treinamento bruto. Caso não especificado
-                se utilizará o valor ms/3 (ms-maior dimensão do mapa de
-                treinamento).
+            radiusin: initial rough training radius. In case its not specified
+                the value ms/3 will be used (ms-largest dimension of the training
+                map).
 
-            radiusfin: Raio inicial do treinamento bruto. Caso não especificado
-                se utilizará o valor radiusin/6.
+            radiusfin: initial rough training radius. In case its not specified
+                the value radiusin/6 will be used.
 
-            trainlen_factor: fator que multiplicará o quantidade de épocas de
-                treinamento.
+            trainlen_factor: factor that will multiply the amount of training
+                epochs.
 
-            maxtrainlen: tamanho máximo de iterações permitidas para
-                treinamento.
+            maxtrainlen: maximum size of allowed iterations for
+                training.
         """
 
         ms, mpd = self._calculate_ms_and_mpd()
         trainlen = min(int(np.ceil(30 * mpd)), maxtrainlen) if not trainlen else trainlen
         trainlen = int(trainlen * train_len_factor)
 
-        # Definição automática dos valores de raio, caso não tenham sido definidos.
+        # Automatic definition of radius values, in case they have not been defined
         if self.initialization == 'random':
             radiusin = max(1, np.ceil(ms / 3.)) if not radiusin else radiusin
             radiusfin = max(1, radiusin / 4.) if not radiusfin else radiusfin
@@ -1045,37 +1030,37 @@ class SOM(object):
                        train_len_factor=1,
                        maxtrainlen=1000):
         """
-        Método para implementação do treinamento de ajuste fino do objeto SOM.
+        Method for implementing SOM object fine-tuning training.
 
         Args:
-            njob: número de trabalhos em paralelo.
+            njob: number of jobs in parallel.
 
-            shared_memory: uso de memória compartilhada.
+            shared_memory: shared memory usage.
 
-            trainlen: número de iterações do treinamento de ajuste fino. Caso
-                não seja preenchida será calculado o valor definido por:
-                60x mpd (neurônios/dados).
+            trainlen: number of iterations of the fine-tuning training. In case
+                its not filled in, it will be calculated the value defined by:
+                60x mpd (neurons/data).
 
-            radiusin: Raio inicial do treinamento de ajuste fino. Caso não
-                especificado se utilizará o valor ms/12 (ms-maior dimensão do
-                mapa de  treinamento).
+            radiusin: initial radius of the fine-tuning training. If not
+                specified, it will be used the value ms/12 (ms-greatest dimension of the
+                training map).
 
-            radiusfin: Raio inicial do treinamento bruto. Caso não especificado
-                se utilizará o valor radiusin/25.
+            radiusfin: initial rough training radius. In case its not specified
+                the value radiusin/25 will be used.
 
-            trainlen_factor: fator que multiplicará o quantidade de épocas de
-                treinamento.
+            trainlen_factor: factor that will multiply the amount of training
+                epochs.
 
-            maxtrainlen: tamanho máximo de iterações permitidas para
-                treinamento.
+            maxtrainlen: maximum size of allowed iterations for
+                training.
         """
 
         ms, mpd = self._calculate_ms_and_mpd()
 
-        # Definição automática dos valores de raio, caso não tenham sido definidos.
+        # Automatic definition of radius values, in case they have not been defined
         if self.initialization == 'random':
             trainlen = min(int(np.ceil(50 * mpd)), maxtrainlen) if not trainlen else trainlen
-            radiusin = max(1, ms / 8.) if not radiusin else radiusin  # do raio final no treinamento rough
+            radiusin = max(1, ms / 8.) if not radiusin else radiusin  # of final radius in rough training
             radiusfin = max(1, radiusin / 25.) if not radiusfin else radiusfin
 
         elif self.initialization == 'pca':
@@ -1098,29 +1083,29 @@ class SOM(object):
                     njob=-1,
                     shared_memory=True):
         """
-        Método para implementação do treinamento em batch.
+        Method for implementing batch training.
 
         Args:
-            trainlen: número de iterações completas de treinamento.
+            trainlen: number of completed training iterations.
 
-            radiusin: raio inicial do treinamento.
+            radiusin: initial training radius.
 
-            radiusfin: raio final do treinamento.
+            radiusfin: final training radius.
 
-            njob: número de trabalhos em paralelo.
+            njob: number of parallel jobs.
 
-            shared_memory: uso de memória compartilhada.
+            shared_memory: shared memory usage.
 
         Returns:
-            Retorna o resultado do treinamento em batch (atualizando as
-            variáveis de classe) para os parâmetros selecionados.
+            Returns the result of batch training (updating the
+            class variables) for the selected parameters.
         """
-        # Achar o range de raios entre o raio inicial e final com a quantidade de loop especificada pelo trainlen
+        # Find the radius range between the start and end radius with the amount of loop specified by trainlen
         radius = np.linspace(radiusin, radiusfin, trainlen)
 
         bmu = None
 
-        # Processso de treinamento para inputs com dados completos
+        # Training process for inputs with complete data
         if self.missing == False:     
             if shared_memory:
                 data = self.get_data
@@ -1133,74 +1118,74 @@ class SOM(object):
                 data = self.get_data
                 
 
-            #Barra de Treinamento
+            # Training bar
             pbar = tqdm(range(trainlen), mininterval=1)
             for i in pbar:
                 if self.bootstrap:
-                    # Passar todos os dados na ultima epoca de treinamento, para garantir que
-                    # todos os vetores tenham BMU
-                    if self.actual_train == "Fino" and self.train_finetune_len == i:
+                    # Pass all the data in the last training epoch, to guarantee that
+                    # all vectors have BMU
+                    if self.actual_train == "Fine" and self.train_finetune_len == i:
                         bootstrap_i = np.arange(0, self._dlen)
                     else:
-                        # Criar indices bootstrap para amostrar do array de treinamento
+                        # Create bootstrap indexes for samples from the training array
                         bootstrap_i = np.sort(
                             np.random.choice(
                                 np.arange(0, self._dlen, 1), int(self.bootstrap_proportion * self._dlen), 
                                 replace=False))
                         
-                    # Define a vizinhança para cada raio especificado
+                    # Define the neighborhood for each specified radius
                     neighborhood = self.neighborhood.calculate(
                         self._distance_matrix, radius[i], self.codebook.nnodes)
 
-                    # Encontra o BMU para os dados.
+                    # Find the BMU for the data
                     bmu = self._find_bmu(data[bootstrap_i], njb=njob)
 
-                    # Atualiza os BMUs com os dados
+                    # Update the BMU with the data
                     self.codebook.matrix = self._update_codebook_voronoi(data[bootstrap_i],
                                                                          bmu,
                                                                          neighborhood)
 
-                    # X2 é parte da distancia euclideana usada durante o encontro dos bmus
-                    # para cada linha de dado. Como é um valor fixo ele pode ser ignorado durante
-                    # o encontro dos bmus para cada dado de entrada, mas é necessário para o calculo do 
-                    # da quantificacao do erro.
+                    # X2 is part of the Euclidean distance used during the finding of BMU
+                    # for each line of data. As it is a fixed value, it can be ignored during
+                    # the encounter of the BMU for each input data, but it is necessary for the calculation of the
+                    # quantification error
                     fixed_euclidean_x2 = np.einsum('ij,ij->i', np.nan_to_num(data[bootstrap_i], nan=0.0), np.nan_to_num(data[bootstrap_i], nan=0.0))
 
-                    # Atualização da barra de progresso
-                    pbar.set_description(f"Época: {i+1}. Raio:{round(radius[i],2)}. QE: {round(np.mean(np.sqrt(bmu[1] + fixed_euclidean_x2)),4)}")
+                    # Progress bar update
+                    pbar.set_description(f"Epoch: {i+1}. Radius:{round(radius[i],2)}. QE: {round(np.mean(np.sqrt(bmu[1] + fixed_euclidean_x2)),4)}")
 
 
-                    # Atualiza somente os bmus dos vetores que participaram dessa época de treinamento
+                    # Update only the BMU of the vectors that participated in this training epoch
                     self._bmu[:,bootstrap_i] = bmu
                 
-                # Treinamento sem bootstrap
+                # Training without bootstrap
                 else:
-                    # Define a vizinhança para cada raio especificado
+                    # Define the neighborhood for each specified radius
                     neighborhood = self.neighborhood.calculate(
                         self._distance_matrix, radius[i], self.codebook.nnodes)
 
-                    # Encontra o BMU para os dados.
+                    # Find the BMU for the data
                     bmu = self._find_bmu(data, njb=njob)
 
-                    # Atualiza os BMUs com os dados
+                    # Update the BMU with the data
                     self.codebook.matrix = self._update_codebook_voronoi(data,
                                                                         bmu,
                                                                         neighborhood)
 
-                    # X2 é parte da distancia euclideana usada durante o encontro dos bmus
-                    # para cada linha de dado. Como é um valor fixo ele pode ser ignorado durante
-                    # o encontro dos bmus para cada dado de entrada, mas é necessário para o calculo do 
-                    # da quantificacao do erro.
+                    # X2 is part of the Euclidean distance used during the finding of BMU
+                    # for each line of data. As it is a fixed value it can be ignored during
+                    # the encounter of the BMU for each input data, but it is necessary for the calculation of the
+                    # error quantification
                     fixed_euclidean_x2 = np.einsum('ij,ij->i', np.nan_to_num(data, nan=0.0), np.nan_to_num(data, nan=0.0))
 
-                    # Atualização da barra de progresso
-                    pbar.set_description(f"Época: {i+1}. Raio:{round(radius[i],2)}. QE: {round(np.mean(np.sqrt(bmu[1] + fixed_euclidean_x2)),4)}")
+                    # Progress bar update
+                    pbar.set_description(f"Epoch: {i+1}. Radius:{round(radius[i],2)}. QE: {round(np.mean(np.sqrt(bmu[1] + fixed_euclidean_x2)),4)}")
                     
                     # Atualizar os BMUs
                     self._bmu = bmu
 
 
-        # Processo de treinamento para inputs com dados faltantes
+        # Training process for inputs with missing data
         elif self.missing == True:
             if shared_memory:
                 data = self.get_data
@@ -1213,284 +1198,280 @@ class SOM(object):
                 data = self.get_data
 
 
-            #Barra de Progresso
+            # Progress bar
             pbar = tqdm(range(trainlen), mininterval=1)
             for i in pbar:
                 if self.bootstrap:
-                    # Passar todos os dados na ultima epoca de treinamento, para garantir que
-                    # todos os vetores tenham BMU
+                    # Pass all the data in the last training epoch, to guarantee that
+                    # all vectors have BMU
                     if i==0:
                         bootstrap_i = np.arange(0, self._dlen)
                     else:
-                        # Criar indices bootstrap para amostrar do array de treinamento
+                        # Create bootstrap indexes for samples from the training array
                         bootstrap_i = np.sort(
                             np.random.choice(
                                 np.arange(0, self._dlen, 1), int(self.bootstrap_proportion * self._dlen), 
                                 replace=False))
                     
-                    # Define a vizinhança para cada raio especificado
+                    # Define the neighborhood for each specified radius
                     neighborhood = self.neighborhood.calculate(
                         self._distance_matrix, radius[i], self.codebook.nnodes)
 
-                    # Encontra o BMU e atualiza os dados inputados para busca do BMU
-                    # conforme o treinamento
+                    # Find the BMU and update the input data for the BMU search
+                    # according to training
 
-                    # Apresenta matriz incompleta no treinamento bruto
-                    if self.actual_train == "Bruto":
-                        # Encontra os dados dos BMUs
-                        #data = np.nan_to_num(data)
+                    # Display incomplete matrix in rough training
+                    if self.actual_train == "Rough":
+                        # Find the BMU data
                         bmu = self._find_bmu(data[bootstrap_i], njb=njob)
                         
-                        # Atualiza os pesos de acordo coma função de vizinhança especificada
+                        # Update the weights according to the specified neighborhood function
                         self.codebook.matrix = self._update_codebook_voronoi(data[bootstrap_i],
                                                                              bmu,
                                                                              neighborhood, 
                                                                              missing=True)
                         
-                        # Preencher com os valores de epocas anteriores para manter caso nao participe
-                        # do batch atual
+                        # Fill with the values ​​of previous epochs to keep in case you do not participate
+                        # of the current batch
                         data[self.data_missing["indices"]] = self.data_missing["nan_values"]
 
-                        #Preencher os locais de dados vazios com os valores encontrados nos bmus
-                        # a cada iteração
+                        # Fill the empty data locations with the values ​​found in the BMU
+                        # every iteration
                         nan_mask = np.isnan(self.data_raw[bootstrap_i])
 
                         for j in range(self._data[bootstrap_i].shape[0]):
                             bmu_index = bmu[0][j].astype(int)
-                            # Inserir um componente de aleatoriedade e regularização na
-                            # imputação dos dados durante o treinamento, para não
-                            # convergir tão rapido
+                            # Insert a randomness and regularization component in the
+                            # data imputation during training, so as not to
+                            # converge as fast
                             data[bootstrap_i[j]][nan_mask[j]] = self.codebook.matrix[bmu_index][nan_mask[j]]
  
-                        # Atualizar dados faltantes
+                        # Update missing data
                         self.data_missing["nan_values"] = data[self.data_missing["indices"]]
 
-                        # Apagar os dados na variavel data
+                        # Delete the data in the data variable
                         data[self.data_missing["indices"]] = np.full(len(self.data_missing["indices"][0]), np.nan)
 
                         if self.save_nan_hist:
-                            # Adicionar no historico de processamento de nan
+                            # Add to nan's processing history
                             self.nan_value_hist.append(self.data_missing["nan_values"])
 
-                        # Atualização da barra de progresso
+                        # Progress bar update
                         QE = round(np.mean(np.sqrt(bmu[1])),4)
-                        pbar.set_description(f"Época: {i+1}. Raio:{round(radius[i],2)}. QE: {QE}")
+                        pbar.set_description(f"Epoch: {i+1}. Radius:{round(radius[i],2)}. QE: {QE}")
 
-                    # Apresenta matriz inputada no treinamento fino
-                    elif self.actual_train == "Fino":
+                    # Display imputed matrix in fine training
+                    elif self.actual_train == "Fine":
                         if self.previous_epoch:
-                            #preenche os valores faltantes no data com os dados da interacao anterior para busca BMU
+                            # fill in the missing values ​​in data with data from the previous interaction for BMU search
                             data[self.data_missing["indices"]] = self.data_missing["nan_values"]
 
-                            # Encontra os dados dos BMUs
+                            # Find the BMU data
                             bmu = self._find_bmu(data[bootstrap_i], njb=njob)
                             fixed_euclidean_x2 = np.einsum('ij,ij->i', np.nan_to_num(data[bootstrap_i], nan=0.0), np.nan_to_num(data[bootstrap_i], nan=0.0))
 
 
-                            #Preencher os locais de dados vazios com os valores encontrados nos bmus
-                            # a cada iteração
+                            # Fill the empty data locations with the values ​​found in the BMU
+                            # every iteration
                             nan_mask = np.isnan(self.data_raw[bootstrap_i])
 
-                            # Fator de regularização
+                            # Regularization factor
                             reg = radius[i]/self.total_radius-1/self.total_radius
 
                             for j in range(self._data[bootstrap_i].shape[0]):
                                 bmu_index = bmu[0][j].astype(int)
-                                # Inserir um componente de aleatoriedade e regularização na
-                                # imputação dos dados durante o treinamento, para não
-                                # convergir tão rapido
+                                # Insert a randomness and regularization component in the
+                                # imputation of data during training, so as not to
+                                # converge too fast
                                 data[bootstrap_i[j]][nan_mask[j]] = self.codebook.matrix[bmu_index][nan_mask[j]]*np.random.uniform(1-reg, 1+reg, np.sum(nan_mask[j]))
 
-                            # Atualiza os pesos de acordo coma função de vizinhança especificada
+                            # Update the weights according to the specified neighborhood function
                             self.codebook.matrix = self._update_codebook_voronoi(data[bootstrap_i],
                                                                                 bmu,
                                                                                 neighborhood)
 
-                            # Atualizar dados faltantes
+                            # Update missing data
                             self.data_missing["nan_values"] = data[self.data_missing["indices"]]
 
-                            # Apagar os dados na variavel data
+                            # Delete the data in the data variable
                             data[self.data_missing["indices"]] = np.full(len(self.data_missing["indices"][0]), np.nan)
 
                             if self.save_nan_hist:
-                                # Adicionar no historico de processamento de nan
+                                # Add to nan's processing history
                                 self.nan_value_hist.append(self.data_missing["nan_values"])
 
-                            # Atualização da barra de progresso
+                            # Progress bar update
                             QE = round(np.mean(np.sqrt(bmu[1] + fixed_euclidean_x2)),4)
-                            pbar.set_description(f"Época: {i+1}. Raio:{round(radius[i],2)}. QE: {QE}. Reg:{round(reg,2)}")
+                            pbar.set_description(f"Epoch: {i+1}. Radius:{round(radius[i],2)}. QE: {QE}. Reg:{round(reg,2)}")
                         else:
-                            # Encontra os dados dos BMUs
-                            #data = np.nan_to_num(data)
+                            # Find the BMU data
                             bmu = self._find_bmu(data[bootstrap_i], njb=njob)
                             
-                            # Atualiza os pesos de acordo coma função de vizinhança especificada
+                            # Update the weights according to the specified neighborhood function
                             self.codebook.matrix = self._update_codebook_voronoi(data[bootstrap_i],
                                                                                 bmu,
                                                                                 neighborhood, 
                                                                                 missing=True)
                             
-                            # Preencher com os valores de epocas anteriores para manter caso nao participe
-                            # do batch atual
+                            # Fill with the values ​​of previous epochs to keep in case you do not participate
+                            # of the current batch
                             data[self.data_missing["indices"]] = self.data_missing["nan_values"]
 
-                            #Preencher os locais de dados vazios com os valores encontrados nos bmus
-                            # a cada iteração
+                            # Fill the empty data locations with the values ​​found in the BMU
+                            # every iteration
                             nan_mask = np.isnan(self.data_raw[bootstrap_i])
 
                             for j in range(self._data[bootstrap_i].shape[0]):
                                 bmu_index = bmu[0][j].astype(int)
-                                # Inserir um componente de aleatoriedade e regularização na
-                                # imputação dos dados durante o treinamento, para não
-                                # convergir tão rapido
+                                # Insert a randomness and regularization component in the
+                                # data imputation during training, so as not to
+                                # converge as fast
                                 data[bootstrap_i[j]][nan_mask[j]] = self.codebook.matrix[bmu_index][nan_mask[j]]
     
-                            # Atualizar dados faltantes
+                            # Update missing data
                             self.data_missing["nan_values"] = data[self.data_missing["indices"]]
 
-                            # Apagar os dados na variavel data
+                            # Delete the data in the data variable
                             data[self.data_missing["indices"]] = np.full(len(self.data_missing["indices"][0]), np.nan)
 
                             if self.save_nan_hist:
-                                # Adicionar no historico de processamento de nan
+                                # Add to nan's processing history
                                 self.nan_value_hist.append(self.data_missing["nan_values"])
 
-                            # Atualização da barra de progresso
+                            # Progress bar update
                             QE = round(np.mean(np.sqrt(bmu[1])),4)
-                            pbar.set_description(f"Época: {i+1}. Raio:{round(radius[i],2)}. QE: {QE}")
+                            pbar.set_description(f"Epoch: {i+1}. Radius:{round(radius[i],2)}. QE: {QE}")
 
                     if self.history_plot:
                         if i%2 == 0:
                             self.plot_umatrix(figsize = (5,3),
                                          hits = True,
                                          save = True,
-                                         file_name = f"{self.actual_train}_epoca{i+1}",
+                                         file_name = f"{self.actual_train}_epoch{i+1}",
                                          bmu=bmu)
 
-                    # Atualiza somente os bmus dos vetores que participaram dessa época de treinamento
+                    # Update only the BMU of the vectors that participated in this training epoch
                     self._bmu[:, bootstrap_i] = bmu
                 else:
-                    # Define a vizinhança para cada raio especificado
+                    # Define the neighborhood for each specified radius
                     neighborhood = self.neighborhood.calculate(
                         self._distance_matrix, radius[i], self.codebook.nnodes)
 
-                    # Encontra o BMU e atualiza os dados inputados para busca do BMU
-                    # conforme o treinamento
+                    # Find the BMU and update the input data for the BMU search
+                    # according to training
 
-                    # Apresenta matriz incompleta no treinamento bruto
-                    if self.actual_train == "Bruto":
-                        # Encontra os dados dos BMUs
-                        #data = np.nan_to_num(data)
+                    # Display incomplete matrix in rough training
+                    if self.actual_train == "Rough":
+                        # Find the BMU data
                         bmu = self._find_bmu(data, njb=njob)
 
-                        # Atualiza os pesos de acordo coma função de vizinhança especificada
+                        # Update the weights according to the specified neighborhood function
                         self.codebook.matrix = self._update_codebook_voronoi(data,
                                                                             bmu,
                                                                             neighborhood, 
                                                                             missing=True)
                         
-                        #Preencher os locais de dados vazios com os valores encontrados nos bmus
-                        # a cada iteração
+                        # Fill the empty data locations with the values ​​found in the BMU
+                        # every iteration
                         nan_mask = np.isnan(self.data_raw)
 
                         for j in range(self._data.shape[0]):
                             bmu_index = bmu[0][j].astype(int)
-                            # Inserir um componente de aleatoriedade e regularização na
-                            # imputação dos dados durante o treinamento, para não
-                            # convergir tão rapido
+                            # Insert a randomness and regularization component in the
+                            # data imputation during training, so as not to
+                            # converge as fast
                             data[j][nan_mask[j]] = self.codebook.matrix[bmu_index][nan_mask[j]]
                         
-                        # Atualizar dados faltantes
+                        # Update missing data
                         self.data_missing["nan_values"] = data[self.data_missing["indices"]]
 
-                        # Apagar os dados na variavel data
+                        # Delete the data in the data variable
                         data[self.data_missing["indices"]] = np.full(len(self.data_missing["indices"][0]), np.nan)
                         if self.save_nan_hist:
-                            # Adicionar no historico de processamento de nan
+                            # Add to nan's processing history
                             self.nan_value_hist.append(self.data_missing["nan_values"])
 
-                        # Atualização da barra de progresso
+                        # Progress bar update
                         QE = round(np.mean(np.sqrt(bmu[1])),4)
-                        pbar.set_description(f"Época: {i+1}. Raio:{round(radius[i],2)}. QE: {QE}")
+                        pbar.set_description(f"Epoch: {i+1}. Radius:{round(radius[i],2)}. QE: {QE}")
 
-                    # Apresenta matriz inputada no treinamento fino
-                    elif self.actual_train == "Fino":
+                    # Display matrix inputed in fine training
+                    elif self.actual_train == "Fine":
                         if self.previous_epoch:
 
-                            #preenche os valores faltantes no data com os dados da interacao anterior para busca BMU
+                            # Fill in the missing values ​​in data with data from the previous interaction for BMU search
                             data[self.data_missing["indices"]] = self.data_missing["nan_values"]
 
-                            # Encontra os dados dos BMUs
+                            # Find the BMU data
                             bmu = self._find_bmu(data, njb=njob)
                             fixed_euclidean_x2 = np.einsum('ij,ij->i', np.nan_to_num(data, nan=0.0), np.nan_to_num(data, nan=0.0))
 
 
-                            #Preencher os locais de dados vazios com os valores encontrados nos bmus
-                            # a cada iteração
+                            # Fill the empty data locations with the values ​​found in the BMU
+                            # every iteration
                             nan_mask = np.isnan(self.data_raw)
 
-                            # Fator de regularização
+                            # Regularization factor
                             reg = radius[i]/self.total_radius-1/self.total_radius
 
                             for j in range(self._data.shape[0]):
                                 bmu_index = bmu[0][j].astype(int)
-                                # Inserir um componente de aleatoriedade e regularização na
-                                # imputação dos dados durante o treinamento, para não
-                                # convergir tão rapido
+                                # Insert a randomness and regularization component in the
+                                # data imputation during training, so as not to
+                                # converge as fast
                                 data[j][nan_mask[j]] = self.codebook.matrix[bmu_index][nan_mask[j]]*np.random.uniform(1-reg, 1+reg, np.sum(nan_mask[j]))
                             
-                            # Atualiza os pesos de acordo coma função de vizinhança especificada
+                            # Update the weights according to the specified neighborhood function
                             self.codebook.matrix = self._update_codebook_voronoi(data,
                                                                                 bmu,
                                                                                 neighborhood)
 
-                            # Atualizar dados faltantes
+                            # Update missing data
                             self.data_missing["nan_values"] = data[self.data_missing["indices"]]
 
-                            # Apagar os dados na variavel data
+                            # Delete the data in the data variable
                             data[self.data_missing["indices"]] = np.full(len(self.data_missing["indices"][0]), np.nan)
 
                             if self.save_nan_hist:
-                                # Adicionar no historico de processamento de nan
+                                # Add to nan's processing history
                                 self.nan_value_hist.append(self.data_missing["nan_values"])
 
-                            # Atualização da barra de progresso
+                            # Progress bar update
                             QE = round(np.mean(np.sqrt(bmu[1] + fixed_euclidean_x2)),4)
-                            pbar.set_description(f"Época: {i+1}. Raio:{round(radius[i],2)}. QE: {QE}. Reg:{round(reg,2)}")
+                            pbar.set_description(f"Epoch: {i+1}. Radius:{round(radius[i],2)}. QE: {QE}. Reg:{round(reg,2)}")
                         else:
-                            # Encontra os dados dos BMUs
-                            #data = np.nan_to_num(data)
+                            # Find the BMU data
                             bmu = self._find_bmu(data, njb=njob)
 
-                            # Atualiza os pesos de acordo coma função de vizinhança especificada
+                            # Update the weights according to the specified neighborhood function
                             self.codebook.matrix = self._update_codebook_voronoi(data,
                                                                                 bmu,
                                                                                 neighborhood, 
                                                                                 missing=True)
                             
-                            #Preencher os locais de dados vazios com os valores encontrados nos bmus
-                            # a cada iteração
+                            # Fill the empty data locations with the values ​​found in the BMU
+                            # every iteration
                             nan_mask = np.isnan(self.data_raw)
 
                             for j in range(self._data.shape[0]):
                                 bmu_index = bmu[0][j].astype(int)
-                                # Inserir um componente de aleatoriedade e regularização na
-                                # imputação dos dados durante o treinamento, para não
-                                # convergir tão rapido
+                                # Insert a randomness and regularization component in the
+                                # data imputation during training, so as not to
+                                # converge as fast
                                 data[j][nan_mask[j]] = self.codebook.matrix[bmu_index][nan_mask[j]]
                             
-                            # Atualizar dados faltantes
+                            # Update missing data
                             self.data_missing["nan_values"] = data[self.data_missing["indices"]]
 
-                            # Apagar os dados na variavel data
+                            # Delete the data in the data variable
                             data[self.data_missing["indices"]] = np.full(len(self.data_missing["indices"][0]), np.nan)
                             if self.save_nan_hist:
-                                # Adicionar no historico de processamento de nan
+                                # Add to nan's processing history
                                 self.nan_value_hist.append(self.data_missing["nan_values"])
 
-                            # Atualização da barra de progresso
+                            # Progress bar update
                             QE = round(np.mean(np.sqrt(bmu[1])),4)
-                            pbar.set_description(f"Época: {i+1}. Raio:{round(radius[i],2)}. QE: {QE}")
+                            pbar.set_description(f"Epoch: {i+1}. Radius:{round(radius[i],2)}. QE: {QE}")
 
                     if self.history_plot:
                         if i%2 == 0:
@@ -1499,7 +1480,7 @@ class SOM(object):
                                          save = True,
                                          file_name = f"{self.actual_train}_epoca{i+1}",
                                          bmu=bmu)
-                    # Atualizar bmus
+                    # Update BMU
                     self._bmu = bmu
             
             self.params_json
@@ -1511,24 +1492,24 @@ class SOM(object):
                  nth=1,
                  project=False):
         """
-        Encontra os BMUs (Best Matching Units) para cada dado de input através
-        da matriz de dados de entrada. De forma unificada paralelizando o
-        cálculo ao invés de usar dado a dado e comparar com o codebook.
+        Finds the BMU (Best Matching Units) for each input data through
+        of the input data matrix. In a unified way parallelizing the
+        calculation instead of going data by data and comparing with the codebook.
 
         Args:
-            input_matrix: matriz numpy ndarray representando as amostras do
-                input como linhas e as variáveis como colunas.
+            input_matrix: numpy ndarray matrix representing the samples of the
+                input as rows and variables as columns.
 
-            njb: numero de jobs para a busca paralelizada. Default: -1 (Busca
-                automática pelo número de cores de processamento)
+            njb: number of jobs for the parallel search. Default: -1 (automatic
+                search by the number of processing colors)
 
             nth:
 
-            project: valor booleano para o encontro de BMUs relacionados a uma
-                base de projeção em um mapa já treinado.
+            project: boolean value for matching BMU related to a
+                projection base on an already trained map.
 
         Returns:
-            O BMU para cada dado de input no formato [[bmus],[distâncias]].
+            The BMU for each input data in the format [[bmus],[distances]].
         """
 
         dlen = input_matrix.shape[0]
@@ -1539,7 +1520,7 @@ class SOM(object):
         
         pool = Pool(njb)
 
-        # Cria objeto para achar bmu em pedaços de dado
+        # Create object to find BMU in pieces of data
         chunk_bmu_finder = self._chunk_based_bmu_find
 
         def row_chunk(part):
@@ -1548,15 +1529,15 @@ class SOM(object):
         def col_chunk(part):
             return min((part + 1) * dlen // njb, dlen)
         
-        # Separa pedaços dos dados de input input_matrix para serem analisados
-        # pelo chunk_bmu_finder
+        # Separate chunks of the input input_matrix data to be parsed
+        # by chunk_bmu_finder
         chunks = [input_matrix[row_chunk(i):col_chunk(i)] for i in range(njb)]
 
 
         if project:
             missing_proj = np.isnan(input_matrix).any()
             if missing_proj:
-                # Mapeia os pedaços de dado e aplica o método chunk_bmu_finder em cada pedaço, achando os bmus para cada pedaço
+                # Map the data chunks and apply the chunk_bmu_finder method on each chunk, finding the BMU for each chunk
                 b = pool.map(lambda chk: chunk_bmu_finder(chk,
                                                           self.codebook.matrix[:, :input_matrix.shape[1]],
                                                           y2,
@@ -1565,7 +1546,7 @@ class SOM(object):
                                                           missing=missing_proj),
                                                           chunks)
             else:
-                # Mapeia os pedaços de dado e aplica o método chunk_bmu_finder em cada pedaço, achando os bmus para cada pedaço
+                # Map the data chunks and apply the chunk_bmu_finder method on each chunk, finding the BMU for each chunk
                 b = pool.map(lambda chk: chunk_bmu_finder(chk,
                                     self.codebook.matrix[:, :input_matrix.shape[1]], 
                                     y2=y2,
@@ -1575,7 +1556,7 @@ class SOM(object):
                 
         else:
             if self.missing:
-                # Mapeia os pedaços de dado e aplica o método chunk_bmu_finder em cada pedaço, achando os bmus para cada pedaço
+                # Map the data chunks and apply the chunk_bmu_finder method on each chunk, finding the BMU for each chunk
                 b = pool.map(lambda chk: chunk_bmu_finder(chk,
                                                           self.codebook.matrix,
                                                           y2=y2,
@@ -1583,7 +1564,7 @@ class SOM(object):
                                                           missing=True),
                                                           chunks)
             else:
-                # Mapeia os pedaços de dado e aplica o método chunk_bmu_finder em cada pedaço, achando os bmus para cada pedaço
+                # Map the data chunks and apply the chunk_bmu_finder method on each chunk, finding the BMU for each chunk
                 b = pool.map(lambda chk: chunk_bmu_finder(chk,
                                                           self.codebook.matrix, 
                                                           y2,
@@ -1592,8 +1573,8 @@ class SOM(object):
         pool.close()
         pool.join()
 
-        # Organiza os chuncks de dados de BMU em um array [2,dlen] em que a
-        # primeira linha tem os bmus e a segunda as distâncias
+        # Arrange the BMU data chunks into an array [2,dlen] where the
+        # first line has the BMU and the second the distances
         bmu = np.asarray(list(itertools.chain(*b))).T
         del b
         return bmu
@@ -1601,62 +1582,60 @@ class SOM(object):
 
     def _update_codebook_voronoi(self, training_data, bmu, neighborhood, missing=False):
         """
-        Método para atualizar os pesos de cada nó no codebook que pertence a
-        vizinhança do BMU. Primeiro encontra o set Voronoi de cada nó. Precisa
-        calcular uma matriz menor. Mais rápido do que o algorítmo clássico em
-        batch, é baseado na implementação do algoritmo Som Toolbox para
-        Matlab pela Universidade de Helsinky. Primeiramente implementado em
-        Python pela biblioteca SOMPY.
+        Method to update the weights of each node in the codebook that belongs to
+        neighborhood of the BMU. First find each node's Voronoi set. It needs to
+        calculate a smaller matrix. Faster than the classic algorithm in
+        batch, it is based on the implementation of the SOM Toolbox algorithm for
+        MATLAB by the University of Helsinky. First implemented in
+        Python by the SOMPY library.
 
         Args:
-            training_data: matriz de vetores de entrada como linhas e variáveis
-                como colunas.
+            training_data: array of input vectors as rows and variables
+                as columns.
 
-            bmu: BMU para cada dado de entrada. Tem o formato
-                [[bmus],[distâncias]].
+            bmu: BMU for each input data. has the format
+                [[bmus],[distances]].
 
-            neighborhood: matriz representando a vizinhança de cada bmu.
+            neighborhood: matrix representing the neighborhood of each BMU.
 
         Returns:
-            Um codebook atualizado que incorpora o aprendizado dos dados de
-                entrada.
-
+            An updated codebook that incorporates learning from the input data.
         """
         if missing:
-            # Cria uma máscara para os valores faltantes no training_data e substitui por 0
+            # Create a mask for the missing values ​​in training_data and replace it with 0
            training_data[np.isnan(training_data)] = 0
 
-        # Pega todos os números de bmus de cada linha de dado e coloca no
-        # formato Int
+        # Get all the BMU numbers from each data line and put them in the
+        # int format
         row = bmu[0].astype(int)
 
-        # Todos os índices para as colunas
+        # All indexes for columns
         col = np.arange(training_data.shape[0])
 
-        # array com 1 repetido no tamanho das linhas de dado
+        # Array with 1 repeated in the length of the lines of data
         val = np.tile(1, training_data.shape[0])
 
-        # Cria uma matrix esparsa (csr -> compressed sparsed row) com a chamada
+        # Create a sparse matrix (csr -> compressed sparsed row) with the call
         # csr_matrix((val, (row, col)), [shape=(nnodes, dlen)])
         P = csr_matrix((val, (row, col)), shape=(self.codebook.nnodes,
                                                  training_data.shape[0]))
 
-        # Multiplica pelos dados de input para retornar uma matriz S com os
-        # dados de input nos bmus
+        # Multiply by the input data to return a matrix S with the
+        # input data in BMU
         S = P.dot(training_data)
 
-        # Multiplica os valores da vizinhança pela matriz S com os valores de
-        # input nos bmus
+        # Multiply the neighborhood values ​​by the matrix S with the values ​​of
+        # input in the BMU
         nom = neighborhood.T.dot(S)
 
-        # Conta quantas vezes cada BMU foi selecionado por um vetor de entrada
+        # Count how many times each BMU was selected by an input vector
         nV = P.sum(axis=1).reshape(1, self.codebook.nnodes)
 
-        # Multiplica a quantidade de vezes que o bmu foi selecionado pelos
-        # valores de entrada pela função de vizinhança
+        # Multiply the amount of times the BMU was selected by the
+        # values ​​input by the neighborhood function
         denom = nV.dot(neighborhood.T).reshape(self.codebook.nnodes, 1)
 
-        # Divide os valores do nominador pelo denominador
+        # Divide the values ​​in the nominator by the denominator
         new_codebook = np.divide(nom, denom)
 
         return np.around(new_codebook, decimals=6)
@@ -1669,29 +1648,29 @@ class SOM(object):
                             missing=False,
                             project=False):
         """
-        Encontra os BMUs correspondentes a matrix de dados de entrada.
+        Finds the BMU corresponding to the input data matrix.
 
         Args:
-            input_matrix: uma matriz dos dados de entrada, representando os vetores
-                de entrada nas linhas e as variáveis do vetor nas colunas. Quando a
-                busca é paralelizada, a matriz de entrada pode ser uma sub-matriz de
-                uma matriz maior.
+            input_matrix: a matrix of the input data, representing the input
+                vectors in the rows and the vector variables in the columns. When the
+                search is parallelized, the input matrix can be a sub-matrix of
+                a larger array.
 
-            codebook: matriz de pesos para ser usada na busca dos BMUs.
+            codebook: matrix of weights to be used in the search for BMU.
 
             nth:
 
         Returns:
-            Retorna os BMUS e as distâncias para a matriz ou sub-matriz de vetores
-            de entrada. No formato [[bmu],[distância]].
+            Returns the BMU and distances for the matrix or sub-matrix of vectors
+            input. In the format [[bmu],[distance]].
         """
         def dist_by_type(codebook, ddata, missing, train_type=None):
             """
-            Função para escolher o tipo de distãncia a ser calculada dependendo da presença de dados
-            faltantes e/ou do estágio de treinamento.
+            Function to choose the type of distance to be calculated depending on the presence of data
+            absences and/or the training stage.
             """
             if missing:
-                if train_type == "nan_euclid" or train_type == "Projetado":
+                if train_type == "nan_euclid" or train_type == "Projected":
                     d = nan_euclidean_distances(codebook, ddata)
                 else:
                     d = np.dot(codebook, ddata.T)
@@ -1704,77 +1683,77 @@ class SOM(object):
             
             return d
 
-        # Quantidade de inputs (linhas) dos dados de entrada)
+        # Number of entries (rows) of the input data
         dlen = input_matrix.shape[0]
 
-        # Inicializa um array com dlen de linhas e duas colunas
+        # Initialize an array of dlen rows and two columns
         bmu = np.empty((dlen, 2))
         
-        # Quantidade de nos de treinamento no codebook
+        # Number of training nodes in the codebook
         nnodes = codebook.shape[0]
 
-        # Tamanho do batch
+        # Batch size
         blen = min(50, dlen)
 
-        # Inicializador do loop while
+        # While loop initializer
         i0 = 0
         
         if missing:
             while i0 + 1 <= dlen:
-                # Inicio da procura nos dados (linhas da matriz inputada)
+                # Start searching the data (rows of the input matrix)
                 low = i0  
 
-                # Fim da procura nos dados (linhas da matriz inputada) para esse batch
+                # End of data search (rows of the input matrix) for this batch
                 high = min(dlen, i0 + blen)
-                i0 = i0 + blen  # Atualizar o inicializador do loop
+                i0 = i0 + blen  # Update loop initializer
 
-                # Recorte na matriz de input nessas amostras do batch.
+                # Clipping on the input matrix in these batch samples
                 ddata = input_matrix[low:high + 1]
 
-                if self.actual_train == "Bruto" or self.previous_epoch == False:
+                if self.actual_train == "Rough" or self.previous_epoch == False:
                     type_search = "nan_euclid"
                 else:
-                    type_search = "Fino"
+                    type_search = "Fine"
 
                 d = dist_by_type(codebook=codebook, 
                                  ddata=ddata, 
                                  missing=missing, 
-                                 train_type = "Projetado" if project else type_search)
+                                 train_type = "Projected" if project else type_search)
 
-                # Encontrar os BMUs
-                # Função para encontrar a posição dentro do array de distâncias que está
-                # o menor valor (o BMU), e o designar como primeiro atributo da variável
+                # Find the BMU
+                # Function to find the position within the distances array in which is
+                # the smallest value (the BMU), and designate it as the first attribute of the variable
                 # BMU
                 bmu[low:high + 1, 0] = np.argpartition(d, nth, axis=0)[nth - 1]
 
-                # Função para pegar menor distância e designar como segundo atributo da
-                # variável BMU
+                # Function to get the smallest distance and designate as second attribute of
+                # BMU variable
                 bmu[low:high + 1, 1] = np.partition(d, nth, axis=0)[nth - 1]
                 del ddata
         else:
             while i0 + 1 <= dlen:
-                # Inicio da procura nos dados (linhas da matriz inputada)
+                # Start searching the data (rows of the input matrix)
                 low = i0  
 
-                # Fim da procura nos dados (linhas da matriz inputada) para esse batch
+                # End of data search (rows of the input matrix) for this batch
                 high = min(dlen, i0 + blen)
-                i0 = i0 + blen  # Atualizar o inicializador do loop
+                i0 = i0 + blen  # Update loop initializer
 
-                # Recorte na matriz de input nessas amostras do batch.
+                # Clipping on the input matrix in these batch samples
                 ddata = input_matrix[low:high + 1]
 
                 d = dist_by_type(codebook=codebook, 
                                  ddata=ddata, 
                                  missing=missing)
 
-                # Encontrar os BMUs
-                # Função para encontrar a posição dentro do array de distâncias que está
-                # o menor valor (o BMU), e o designar como primeiro atributo da variável
+                # Find the BMU
+                # Function to find the position within the distances array in which is
+                # the smallest value (the BMU), and designate it as the first attribute of the variable
                 # BMU
                 bmu[low:high + 1, 0] = np.argpartition(d, nth, axis=0)[nth - 1]
 
-                # Função para pegar menor distância e designar como segundo atributo da
-                # variável BMU
+                # Function to get the smallest distance and designate as second attribute of
+                # BMU variable
                 bmu[low:high + 1, 1] = np.partition(d, nth, axis=0)[nth - 1]
                 del ddata
 
@@ -1783,8 +1762,8 @@ class SOM(object):
     @property
     def topographic_error(self):
         """
-        Função que está no SOMPY, discordo dessa função, ela busca somente se o primeiro e segundo bmus que 
-        melhor representam o vetor de entrada são vizinhos.
+        Function that is in SOMPY, I disagree with this function, it searches only if the first and second BMU that
+        best represent the input vector are neighbors.
         """
         bmus2 = self._find_bmu(self.get_data, nth=2)
                
@@ -1797,87 +1776,87 @@ class SOM(object):
     @property
     def calculate_topographic_error(self):
         """
-        Cálculo do Erro Topográfico, que se trata de uma medida da qualidade da
-        preservação da estrutura do espaço dos dados de entrada no mapa
-        treinado. É calculado encontrando os neurônios de menor e segunda menor
-        distância euclideana de cada vetor de entrada e avaliando se a
-        preservação dessa vizinhança acontece no mapa de saída treinado. Se
-        ocorre a preservação da vizinhança então se diz que houve preservação da
-        topologia e o erro topográfico é baixo.
-        Para cada vetor de entrada que não tem sua vizinhaça preservada é
-        contado na proporção do erro topográfico, portanto é um erro que varia
-        de 0 (todos os vetores de entrada mantiveram a vizinhança) a 1 (nenhum
-        vetor de entrada preservou a sua vizinhança).
-
+        Calculation of the Topographic Error, which is a measure of the quality of the
+        preservation of the space structure of the input data in the trained
+        map. It is calculated by finding the smallest and second smallest neurons
+        Euclidean distance of each input vector and evaluating whether the
+        preservation of this neighborhood takes place in the trained output map. If
+        the preservation of the neighborhood occurs so it is said that there was preservation of the
+        topology and the topographic error is low.
+        For each input vector that is not neighborhood preserved it is
+        counted in proportion to the topographical error, so it is an error that varies
+        from 0 (all input vectors maintained the neighborhood) to 1 (none
+        input vector preserved its neighborhood).
         """
-        # Procurar em chunks para não ter gargalo de RAM
-        #Iniciar o loop while
+
+        # Search in chunks to avoid a RAM bottleneck
+        # Start the while loop
         i0 = 0
         
-        # Tamanho do batch
+        # Batch size
         blen = 1000
         
-        # Indices
+        # Indexes
         indices_before = np.zeros((self.data_raw.shape[0],2))
         indices_after = np.zeros((self.data_raw.shape[0],2))
         
         while i0+1 <= self._dlen:
-            # Inicio da procura dos dados
+            # Start data search
             low = i0
-            
-            # Fim da procura dos dados
+
+            # End data search
             high = min(self._dlen, i0+blen)
-            
-            #Recortar a matriz para esse batch
+
+            # Cut the matrix for this batch
             ddata = self.data_raw[low:high + 1]
-            
-            #Matriz de distãncias pré-treinamento
+
+            # Pre-training distance matrix
             dist_before = nan_euclidean_distances(ddata, ddata)
 
-            # Encontrar vetores mais próximos dos vetores de entrada
+            # Find vectors closest to input vectors
             argmin_before = np.argsort(dist_before, axis=0)[1,:]
-            
-            # Indices pareados de vetores mais próximos
+
+            # Paired indexes of closest vectors
             indices_before_batch = np.array([[i,j] for i,j in zip(np.arange(0, len(ddata), 1), argmin_before)])
-            
-            # Preencher vetor principal
+
+            # Fill main vector
             for i, j in zip(np.arange(low, high+1, 1), np.arange(0, blen+1, 1)):
-                indices_before[i] = indices_before_batch[j]
-            
-            # Gerar coordenadas cúbicas para o mapa
+                indices_before[i] = indices_before_batch[j]            
+
+            # Generate cubic coordinates for the map
             coordinates = self._generate_oddr_cube_lattice(self.mapsize[0], self.mapsize[1])
             cols, rows = self.mapsize[0], self.mapsize[1]
             
-            # Criar vizinhança toroidal
+            # Create toroidal neighborhood
             toroid_neigh = [[0, 0], [cols, 0], [cols, rows], [0, rows], [-cols, rows], [-cols, 0], [-cols, -rows], [0,-rows], [cols, -rows]]
             toroid_neigh = [self._oddr_to_cube(i[0], i[1]) for i in toroid_neigh]
             
-            # Captar BMUs
+            # Capture BMU
             bmus = self._bmu[0][low:high + 1].astype(int)
             
-            # Criar matriz vazia para preenchimento das distâncias manhatan dentro de um grid cúbico hexagonal
+            # Create empty matrix to fill the Manhatan distances inside a hexagonal cubic grid
             dist_after = np.zeros([len(ddata),len(ddata)])
             for i in range(len(ddata)):
                 for j in range(len(ddata)):
                     dist = int(min([self._cube_distance(coordinates[bmus[i]] + neig,coordinates[bmus[j]]) for neig in toroid_neigh]))
                     dist_after[j][i] = dist
                     
-            # Encontrar hits mais próximos dos BMUs
+            # Find closest hits to BMU
             argmin_after = np.argsort(dist_after, axis=0)[1,:]
             
-            # Indices pareados desses hits
+            # Paired indexes of these hits
             indices_after_batch = np.array([[i,j] for i,j in zip(np.arange(0, len(ddata), 1), argmin_after)])
             
-            # Preencher vetor principal
+            # Fill main vector
             for i, j in zip(np.arange(low, high+1, 1), np.arange(0, blen+1, 1)):
                 indices_after[i] = indices_after_batch[i]
             
-            # Atualizar indice do loop
+            # Update loop index
             i0=i0+blen
             
             del ddata
 
-        # Erro Topográfico: 0 se se mantém a vizinhança e 1 se não se mantem
+        # Topographic error: 0 if the neighborhood is maintained and 1 if not
         topo_error = sum([0 if i==j else 1 for i,j in zip(indices_before, indices_after)])/len(self.data_raw)
 
         return 1-topo_error
@@ -1899,34 +1878,35 @@ class SOM(object):
 
     def build_umatrix(self, expanded=False):
         """
-        Função para calcular a Matriz U de distâncias unificadas a partir da
-        matriz de pesos treinada.
+        Function to calculate the U-Matrix of unified distances from the
+        trained weight matrix.
 
         Args:
-            exapanded: valor booleano para indicar se o retorno será da matriz
-                de distâncias unificadas resumida (média das distâncias dos 6
-                bmus de vizinhança) ou expandida (todos os valores de distância)
-        Retorna:
-            Matriz de distâncias unificada expandida ou resumida.
+            expanded: boolean value to indicate whether the return will be from the
+                summarized unified distances matrix (average of distances from the 6
+                neighborhood BMU) or expanded (all distance values)
+                
+        Returns:
+            Expanded or summarized unified distances matrix.
         """
-        # Função para encontrar distancia rápido
+        # Function to find distance quickly
         def fast_norm(x):
             """
             Retorna a norma L2 de um array 1-D.
             """
             return np.sqrt(np.dot(x, x.T))
 
-        # Matriz de pesos bmus
+        # Matrix of BMU weights
         weights = np.reshape(self.codebook.matrix, (self.mapsize[1], self.mapsize[0], self.codebook.matrix.shape[1]))
 
-        # Busca hexagonal vizinhos
+        # Neighbor hexagonal search
         ii = [[1, 1, 0, -1, 0, 1], [1, 0,-1, -1, -1, 0]]
         jj = [[0, 1, 1, 0, -1, -1], [0, 1, 1, 0, -1, -1]]
 
-        # Inicializar Matriz U
+        # Initialize U-Matrix
         um = np.nan * np.zeros((weights.shape[0], weights.shape[1], 6))
 
-        # Preencher matriz U
+        # Fill U-Matrix
         for y in range(weights.shape[0]):
             for x in range(weights.shape[1]):
                 w_2 = weights[y, x]
@@ -1936,10 +1916,10 @@ class SOM(object):
                         w_1 = weights[y+j, x+i]
                         um[y, x, k] = fast_norm(w_2-w_1)
         if expanded:
-            # Matriz U expandida
+            # Expanded U-Matrix
             return um
         else:
-            # Matriz U reduzida
+            # Reduced U-Matrix
             return np.nanmean(um, axis=2)
         
     
@@ -1952,28 +1932,28 @@ class SOM(object):
                      bmu=None):
         
         if file_name is None:
-            file_name = f"Matriz_U_{self.name}"
+            file_name = f"U_matrix_{self.name}"
 
         if hits:
-            # Contagem de hits
+            # Hit count
             unique, counts = np.unique(bmu[0].astype(int), return_counts=True)
 
-            # Normalizar essa contagem de 0.5 a 2.0 (de um hexagono pequeno até um
-            #hexagono que cobre metade dos vizinhos).
+            # Normalize this count from 0.5 to 2.0 (from a small hexagon to a
+            # hexagon that covers half of the neighbors).
             counts = minmax_scale(counts, feature_range = (0.5,2))
 
             bmu_dic = dict(zip(unique, counts))
             
         
-        # Busca hexagonal vizinhos
+        # Neighbor hexagonal search
         ii = [[1, 1, 0, -1, 0, 1], [1, 0,-1, -1, -1, 0]]
         jj = [[0, 1, 1, 0, -1, -1], [0, 1, 1, 0, -1, -1]]
         
-        # Criar coordenadas
+        # U-Matrix
         xx = np.reshape(self._generate_hex_lattice(self.mapsize[0], self.mapsize[1])[:,0], (self.mapsize[1], self.mapsize[0]))
         yy = np.reshape(self._generate_hex_lattice(self.mapsize[0], self.mapsize[1])[:,1], (self.mapsize[1], self.mapsize[0]))
         
-        # Matriz U
+        # Plotting
         um = self.build_umatrix(expanded = True)
         umat = self.build_umatrix(expanded = False)
         
@@ -1982,13 +1962,13 @@ class SOM(object):
         ax = f.add_subplot()
         ax.set_aspect('equal')
         
-        # Normalizar as cores para todos os hexagonos
+         # Normalize colors for all hexagons
         norm = mpl.colors.Normalize(vmin=np.nanmin(um), vmax=np.nanmax(um))
         counter = 0
         
         for j in range(self.mapsize[1]):
             for i in range(self.mapsize[0]):
-                # Hexagono Central
+                # Central Hexagon
                 hex = RegularPolygon((xx[(j,i)]*2,
                                       yy[(j,i)]*2),
                                      numVertices=6,
@@ -1998,7 +1978,7 @@ class SOM(object):
 
                 ax.add_patch(hex)
 
-                # Hexagono da Direita
+                # Right Hexagon
                 if not np.isnan(um[j, i, 0]):
                     hex = RegularPolygon((xx[(j, i)]*2+1,
                                           yy[(j,i)]*2),
@@ -2008,7 +1988,7 @@ class SOM(object):
                                          alpha=1)
                     ax.add_patch(hex)
 
-                # Hexagono Superior Direita
+                # Upper Right Hexagon
                 if not np.isnan(um[j, i, 1]):
                     hex = RegularPolygon((xx[(j, i)]*2+0.5,
                                           yy[(j,i)]*2+(np.sqrt(3)/2)),
@@ -2018,7 +1998,7 @@ class SOM(object):
                                          alpha=1)
                     ax.add_patch(hex)
 
-                # Hexagono Superior Esquerdo
+                # Upper Left Hexagon
                 if not np.isnan(um[j, i, 2]):
                     hex = RegularPolygon((xx[(j, i)]*2-0.5,
                                           yy[(j,i)]*2+(np.sqrt(3)/2)),
@@ -2028,7 +2008,7 @@ class SOM(object):
                                          alpha=1)
                     ax.add_patch(hex)
                     
-                #Plotar hits
+                # Plot hits
                 if hits:
                     try:
                         hex = RegularPolygon((xx[(j, i)]*2,
@@ -2054,26 +2034,26 @@ class SOM(object):
             if file_path:
                 f.savefig(f"{file_path}/{file_name}.jpg",dpi=300, bbox_inches = "tight")
             else:
-                # Criar diretórios se não existirem
-                path = 'Plotagens/U_matrix'
+                # Create directories if they don't exist
+                path = 'Plots/U_matrix'
                 os.makedirs(path, exist_ok=True)
                 if hits:
-                    f.savefig(f"Plotagens/U_matrix/{file_name}_with_hits.jpg",dpi=300, bbox_inches = "tight")
+                    f.savefig(f"Plots/U_matrix/{file_name}_with_hits.jpg",dpi=300, bbox_inches = "tight")
                 else:
-                    f.savefig(f"Plotagens/U_matrix/{file_name}.jpg",dpi=300, bbox_inches = "tight")
+                    f.savefig(f"Plots/U_matrix/{file_name}.jpg",dpi=300, bbox_inches = "tight")
     
     def rep_sample(self, save=False, project=None):
         """
-        Retorna um dicionário contendo as amostras representativas para cada neurônio de melhor correspondência 
-        (BMU) do mapa auto-organizável (SOM).
+        Returns a dictionary containing the representative samples for each best-matching neuron
+        (BMU) of the self-organizing map (SOM).
 
         Args: 
-            save (bool, optional): Indica se os resultados devem ser salvos em um arquivo de texto. 
-            O padrão é False.
+            save (bool, optional): indicates whether the results should be saved in a text file. 
+            Default is False.
 
         Returns:
-            dict: Um dicionário onde as chaves são os BMUs e os valores são as amostras 
-            representativas associadas a cada BMU, em ordem de representatividade.
+            dict: a dictionary in which the keys are the BMU and the values are the representative samples 
+            associated to each BMU, in order of representativeness.
         """
         if project is not None:
             som_bmus = np.concatenate((self._bmu[0].astype(int),np.array(project.BMU.values-1)))
@@ -2084,7 +2064,7 @@ class SOM(object):
             sample_names = self._sample_names
             data = self.get_data
 
-        # Dicionário de labels com as amostras
+        # Dictionary of labels with samples
         dic = {}
         for key, value in zip(som_bmus, sample_names):
             if key in dic:
@@ -2095,7 +2075,7 @@ class SOM(object):
             else:
                 dic[key] = value
 
-        # Dicionário de indices das amostras em cada BMU
+        # Dictionary of sample indexes in each BMU
         dic_index = {}
         for key, index in zip(som_bmus, range(len(sample_names))):
             if key in dic_index:
@@ -2106,7 +2086,7 @@ class SOM(object):
             else:
                 dic_index[key] = index
         
-        # Reorganização do dicionário pela ordem de distâncias
+        # Reorganize the dictionary by order of distances
         rep_samples_dic = {}
         for bmu, bmu in zip(dic, dic_index):
             samples_name = dic[bmu]
@@ -2124,8 +2104,8 @@ class SOM(object):
             rep_samples_dic[bmu] = rep_samples
         
         if save:
-            name = "Amostras_representativas_projetadas" if project is not None else "Amostras_representativas"
-            with open(f'Resultados/{name}.txt', 'w', encoding='utf-8') as file:
+            name = "Projected_representative_samples" if project is not None else "Representative_samples"
+            with open(f'Results/{name}.txt', 'w', encoding='utf-8') as file:
                 for key, value in rep_samples_dic.items():
                     if isinstance(value, list):
                         value = ', '.join(value)
@@ -2136,11 +2116,11 @@ class SOM(object):
 
     def _expected_mapsize(self, data):
         """
-        Retorna o tamanho esperado do mapa com base na função eurística definida por
-        Vessanto et al (2000) definida a seguir: 5 x sqrt(M).
+        Returns the expected size of the map based on the heuristic function defined by
+        Vesanto et al (2000) defined by: 5 x sqrt(M).
 
         Args:
-            data: os dados de entrada para o treinamento som.
+            data: the input data for the SOM training.
 
         """
         expected = round(np.sqrt(5*np.sqrt(data.shape[0])))
@@ -2155,16 +2135,16 @@ class SOM(object):
 
     def _generate_hex_lattice(self, n_columns, n_rows):
         """
-        Gera as coordenadas xy dos BMUs para um grid hexagonal odd-r. (Colunas
-        ímpares deslocadas para a direita)
+        Generates the xy coordinates of the BMU for an odd-r hexagonal grid (odd
+        columns shifted to the right).
 
         Args:
-            n_rows:Número de linhas do mapa kohonen.
+            n_rows: number of lines in the Kohonen map.
 
-            n_columns:Número de colunas no mapa kohonen.
+            n_columns: number of columns in the Kohonen map.
 
         Returns:
-            Coordenadas do formato [x,y] para os bmus num grid hexagonal.
+            Coordinates in the [x,y] format for the BMU in a hexagonal grid.
 
         """
         ratio = np.sqrt(3) / 2
@@ -2186,14 +2166,14 @@ class SOM(object):
 
     def _generate_rec_lattice(self, n_columns, n_rows):
         """
-        Gera as coordenadas xy dos BMUs para um grid retangular.
+        Generates the xy coordinates of the BMU for a rectangular grid.
 
         Args:
-            n_rows: Número de linhas do mapa kohonen.
-            n_columns: Número de colunas no mapa kohonen.
+            n_rows: number of rows in the Kohonen map.
+            n_columns: number of columns in the Kohonen map.
 
-        Returns:
-            Coordenadas do formato [x,y] para os bmus num grid retangular.
+        returns:
+            Coordinates in the [x,y] format for the BMU in a rectangular grid.
 
         """
         x_coord = []
@@ -2208,15 +2188,15 @@ class SOM(object):
 
     def _oddr_to_cube(self, col, row):
         """
-        Transforma as coordenadas de retangulares em cúbicas.
+        Transforms coordinates from rectangular to cubic.
 
         Args:
-            col: coordenada da coluna que deseja transformar.
+            col: column coordinate you want to transform.
 
-            row: coordenada da linha que deseja transformar.
+            row: coordinate of the row you want to transform.
 
         Returns:
-            Coordenada cúbica no formato [x,y,z]
+            Cubic coordinate in [x,y,z] format
         """
 
         x = col - (row - (row & 1)) / 2
@@ -2227,31 +2207,32 @@ class SOM(object):
 
     def _cube_distance(self,a, b):
         """
-        Calcula a distância manhatan entre duas coordenadas cúbicas.
+        Calculates the Manhattan distance between two cubic coordinates.
+        
         Args:
-            a: Primeira coordenada cúbica no formato [x,y,z]
+            a: first cubic coordinate in [x,y,z] format
 
-            b: Segunda coordenada cúbica no formato [x,y,z]
+            b: second cubic coordinate in [x,y,z] format
 
         Returns:
-            Distância manhatan entre as coordenadas.
+            Manhattan distance between coordinates.
         """
         return (abs(a[0] - b[0]) + abs(a[1] - b[1]) + abs(a[2] - b[2])) / 2
 
 
     def _generate_oddr_cube_lattice(self, n_columns, n_rows):
         """
-        Função para gerar coordenadas cúbicas no formato [x,y,z] para um grid
-        hexagonal odd-r (linhas ímpares deslocadas para a direita) para uma
-        quantidade de colunas e linha pré-determinado.
+        Function to generate cubic coordinates in [x,y,z] format for an odd-r hexagonal
+        grid (odd lines shifted to the right) for a
+        predetermined number of columns and rows.
 
         Args:
-            n_columns: número de colunas
+            n_columns: number of columns.
 
-            n_rows: número de linhas
+            n_rows: number of rows.
 
-        Retorna:
-            coordenadas: lista[x, y, z]
+        Returns:
+            coordinates: list[x, y, z]
         """
         x_coord = []
         y_coord = []
@@ -2262,7 +2243,7 @@ class SOM(object):
                 z = j
                 y = -x -z
 
-                # Colocar nas listas
+                # Put in lists
                 x_coord.append(int(x))
                 y_coord.append(int(y))
                 z_coord.append(int(z))
@@ -2273,7 +2254,7 @@ class SOM(object):
 
 
 
-# silencilar logging do matplotlib
+# Silence matplotlib logging
 import logging
 import sys
 logging.getLogger('mtb.font_manager').disabled = True

@@ -2,9 +2,8 @@ import numpy as np
 
 class Codebook(object):
     """
-    Classe para criaçação do codebook SOM. O codebook é a matriz de pesos que é
-    treinada nos seus processos competitivos, colaborativos e de adaptação
-    sináptica.
+    Class for creating the SOM codebook. The codebook is the matrix of weights that is
+    trained in its competitive, collaborative and adaptive synaptic processes.
     """
 
     def __init__(self, mapsize, lattice, mapshape):
@@ -16,10 +15,10 @@ class Codebook(object):
 
         elif 1 == len(mapsize):
             _size = [1, mapsize[0]]
-            print('Input de sizemap foi considerado\
-                como o número de nós da rede neural')
-            print('O tamanho do mapa \
-                é [{dlen},{dlen}]'.format(dlen=int(mapsize[0] / 2)))
+            print('Sizemap input was considered\
+                as the number of neural network nodes')
+            print('The size of the map \
+                is [{dlen},{dlen}]'.format(dlen=int(mapsize[0] / 2)))
         else:
             pass
 
@@ -31,36 +30,36 @@ class Codebook(object):
     @property
     def get_matrix(self):
         """
-        Retorna a matriz armazenada no objeto atual.
+        Returns the array stored in the current object.
 
-        Retorno:
+        Returns:
 
         matrix: ndarray
-        A matriz armazenada no objeto atual.
+        The array stored in the current object.
         """
         return self.matrix
 
     def random_initialization(self, data):
         """
-        Inicialização do tipo randômica
+        Random type initialization
         Args:
-            data: dados utilizados para a inicialização
+            data: data used for initialization
 
         Returns:
-            Matriz inicializada com as mesmas dimensões dos dados de entrada.
+            Array initialized with the same dimensions as the input data.
         """
 
-        # Controi um array repetindo o menor e o maior valor dos dados com
-        # extensão sendo o número de nós necessário
-        # Modificação para nanmin e nanmax para que se leve em consideração a
-        # existência de dados NaN
+        # Constructs an array by repeating the smallest and largest data values ​​with
+        # extension being the number of nodes required
+        # Modification for nanmin and nanmax to take into account the
+        # existence of NaN data
         mn = np.tile(np.nanmin(data, axis=0), (self.nnodes, 1))
         mx = np.tile(np.nanmax(data, axis=0), (self.nnodes, 1))
 
-        # Valor mínimo + (valor máximo - valor mínimo)*(matriz de números
-        # aleatórios [0,1] com o formato de numero de nós de linhas e número de
-        # colunas dos dados nas colunas. Uma matriz de treinamento inicializada
-        # randomicamente.
+        # Minimum value + (maximum value - minimum value)*(array of random
+        # numbers [0,1] with the format of number of nodes of lines and number of
+        # columns of data in columns. A training matrix randomly
+        # initialized.
         #np.random.seed(0)
         self.matrix = mn + (mx - mn) *\
             (np.random.rand(self.nnodes, data.shape[1]))
@@ -72,19 +71,19 @@ class Codebook(object):
 
     def grid_dist(self, node_ind):
         """
-        Calcula as distâncias no grid para mapas com topologia planar ou
-        toroidal e com lattice retangular ou hexagonal.
+        Calculates distances on the grid for maps with planar or toroidal
+        topology and with rectangular or hexagonal lattice.
 
         Args:
-            node_ind: índice do nó da rede neural, entre 0 e nnodes-1.
+            node_ind: neural network node index, between 0 and nnodes-1.
 
-        Retorna:
-            Retorna as distâncias desse nó para todos os outros nós do grid,
-            dentro dos parâmetros especificados no objeto SOM.
+        Returns:
+            Returns the distances from this node to all other grid nodes,
+            within the parameters specified in the SOM object.
 
         """
 
-        # Definir qual função chamar para cada lattice e topologia
+        # Define which function to call for each lattice and topology
         if self.mapshape == 'planar':
             if self.lattice == 'rect':
                 return self._rect_dist_plan(node_ind)
@@ -101,26 +100,26 @@ class Codebook(object):
 
     def _rect_dist_plan(self, node_ind):
         """
-        Encontra a matriz de distâncias Manhattan (L1) de um nó da rede neural
-        para todos os outros, para um lattice retangular em um mapa com
-        topologia planar.
+        Finds the Manhattan distance matrix (L1) of a neural network node
+        for all others, for a rectangular lattice in a map with
+        planar topology.
 
         Args:
-            node_ind: índice do nó da rede neural, entre 0 e nnodes-1.
+            node_ind: neural network node index, between 0 and nnodes-1.
 
         Returns:
-            Retorna array de distâncias desse nó para todos os outros nós do
-            grid, num mapa planar.
+            Returns array of distances from this node to all other nodes in the
+            grid, on a planar map.
 
         """
-        # Separar os valores de colunas e linhas
+        # Separate column and row values
         rows, cols = self.mapsize
 
-        # Gera as coordenadas xy dos bmus para um grid retangular
+        # Generate the xy coordinates of the BMUs for a rectangular grid
         coordinates = self.generate_rec_lattice(rows, cols)
 
-        # Encontra as distâncias manhatan para um grid retangular através de
-        # suas coordenadas
+        # Find the Manhattan distances for a rectangular grid through
+        # its coordinates
         dist = np.array(abs(coordinates[ind] - coordinates[node_ind]).sum() \
             for ind in range(len(coordinates)))
 
@@ -128,27 +127,27 @@ class Codebook(object):
 
     def _rect_dist_tor(self, node_ind):
         """
-        Encontra a matriz de distâncias de um nó da rede neural para todos os
-        outros, para um lattice hexagonal em um mapa com topologia toroidal.
+        Finds the matrix of distances from a neural network node to all
+        others, for a hexagonal lattice in a map with toroidal topology.
         Args:
-            node_ind: Índice do nó da rede neural, entre 0 e nnodes-1.
+            node_ind: Neural network node index, between 0 and nnodes-1.
 
         Returns:
-            Retorna as distâncias desse nó para todos os outros nós do grid, num
-            mapa toroidal.
+            Returns the distances from this node to all other grid nodes, in a
+            toroidal map.
 
         """
         rows, cols = self.mapsize
 
-        # Gera as coordenadas xy dos bmus para um grid retangular
+        # Generate the xy coordinates of the BMUs for a rectangular grid
         coordinates = self.generate_hex_lattice(rows, cols)
 
-        # Amplia a busca de distâncias para a vizinhança criada pela topologia toroidal, criando periodicidade dos dados
+        # Extends the distance search to the neighborhood created by the toroidal topology, creating periodicity of the data
         toroid_neigh = [[0, 0], [cols, 0], [cols, rows], [0, -rows],
             [-cols, 0], [0, -rows], [-cols, -rows]]
 
-        # Calcula as distâncias na topologia toroidal, encontrando todas as distâncias possíveis segundo torid_neigh e
-        # selecionando o menor
+        # Calculate the distances in the toroidal topology, finding all possible distances according to toroid_neigh and
+        # selecting the smallest
         dist = np.array(
             [min([abs((coordinates[ind] + [neig]) - coordinates[node_ind]).sum()\
              for neig in toroid_neigh]) for ind in range(len(coordinates))])
@@ -158,23 +157,23 @@ class Codebook(object):
     def _hexa_dist_plan(self, node_ind):
         """
 
-        Encontra a matriz de distâncias de um nó da rede neural para todos os
-        outros, para um lattice hexagonal em um mapa com topologia planar.
+        Finds the matrix of distances from a neural network node to all
+        others, for a hexagonal lattice in a map with planar topology.
 
         Args:
-            node_ind: índice do nó da rede neural, entre 0 e nnodes-1.
+            node_ind: neural network node index, between 0 and nnodes-1.
 
         Returns:
-            Retorna as distâncias desse nó para todos os outros nós do grid, num
-            mapa planar.
+            Returns the distances from this node to all other grid nodes, in a
+            planar map.
 
         """
         cols, rows = self.mapsize
 
-        # Gera coordenadas x,y para um grid hexagonal
+        # Generate x,y coordinates for a hexagonal grid
         coordinates = self.generate_oddr_cube_lattice(cols, rows)
 
-        # Encontra as distâncias manhatan para um grid hexagonal através de suas coordenadas xy
+        # Find the manhatan distances for a hexagonal grid via their xy coordinates
         dist = np.array([self.cube_distance(coordinates[node_ind], coordinates[i])**2\
          for i in range(len(coordinates))])
 
@@ -182,32 +181,31 @@ class Codebook(object):
 
     def _hexa_dist_tor(self, node_ind):
         """
-
-        Encontra a matriz de distâncias Manhattan (L1) de um nó da rede neural
-        para todos os outros, para um lattice retangular em um mapa com
-        topologia toroidal.
+        Finds the Manhattan distance matrix (L1) of a neural network node
+        for all others, for a rectangular lattice in a map with
+        toroidal topology.
 
         Args:
-            node_ind: Índice do nó da rede neural, entre 0 e nnodes-1.
+            node_ind: Neural network node index, between 0 and nnodes-1.
 
-        Retorna:
-            Retorna um array de distâncias desse nó para todos os outros nós do
-            grid, num mapa toroidal.
+        Returns:
+            Returns an array of distances from this node to all other nodes in the
+            grid, in a toroidal map.
         """
 
-        # Separar os valores de colunas e linhas
+        # Separate column and row values
         cols, rows = self.mapsize
 
-        # Gera as coordenadas xyz dos bmus para um grid hexagonal 
+        # Generate the BMUs xyz coordinates for a hexagonal grid
         coordinates = self.generate_oddr_cube_lattice(cols, rows)
         
         
-        # Amplia a busca de distâncias para a vizinhança criada pela topologia
-        # toroidal, criando periodicidade dos dados
+        # Extend the distance search to the neighborhood created by the toroidal
+        # topology, creating data periodicity
         toroid_neigh = self.toroid_neighborhood(cols, rows)
 
-        # Calcula as distâncias na topologia toroidal, encontrando todas as
-        # distâncias possíveis segundo torid_neigh e selecionando o menor
+        # Calculate the distances in the toroidal topology, finding all
+        # possible distances according to toroid_neigh and selecting the smallest
         dist = np.zeros(((cols*rows),9))
         for i in range(cols*rows):
             if i >= node_ind:
@@ -219,18 +217,18 @@ class Codebook(object):
 
     def toroid_neighborhood(self, cols, rows):
         """
-        Função para gerar as coordenadas cúbicas na vizinhança toroidal para um dado
-        tamanho de mapa, na ordem: [Central, Direita, Direita Inferior, Inferior,
-        Esquerda Inferior, Esquerda, Esquerda Superior, Superior, Direita Superior].
+        Function to generate the cubic coordinates in the toroidal neighborhood for a given
+        map size, in order: [Center, Right, Bottom Right, Bottom,
+        Bottom Left, Left, Top Left, Top, Top Right].
 
         Args:
 
-            cols: quantidade de colunas do mapa que se deseja gerar.
+            cols: number of map columns to be generated.
 
-            rows: quantidade de linhas do mapa que se deseja gerar.
+            rows: number of rows of the map to be generated.
 
-        Retorna:
-            Lista de coordenadas de distâncias
+        Returns:
+            List of distance coordinates
         """
         toroid_neigh = [[0, 0],
                         [cols, 0],
@@ -247,16 +245,16 @@ class Codebook(object):
 
     def generate_oddr_cube_lattice(self, n_columns, n_rows):
         """
-        Função para gerar coordenadas cúbicas no formato [x,y,z] para um grid
-        hexagonal odd-r (linhas ímpares deslocadas para a direita) para uma
-        quantidade de colunas e linha pré-determinado.
+        Function to generate cubic coordinates in [x,y,z] format for an odd-r
+        hexagonal grid (odd lines shifted to the right) for a
+        predetermined number of columns and row.
         Args:
-            n_columns: número de colunas
+            n_columns: number of columns
 
-            n_rows: número de linhas
+            n_rows: number of rows
 
-        Retorna:
-            coordenadas: lista[x, y, z]
+        Returns:
+            coordinates: list[x, y, z]
         """
         x_coord = []
         y_coord = []
@@ -267,7 +265,7 @@ class Codebook(object):
                 z = j
                 y = -x -z
 
-                # Colocar nas listas
+                # Put in lists
                 x_coord.append(x)
                 y_coord.append(y)
                 z_coord.append(z)
@@ -277,26 +275,26 @@ class Codebook(object):
 
     def cube_distance(self, a, b):
         """
-        Calcula a distância euclideana entre duas coordenadas cúbicas
+        Calculates the Euclidean distance between two cubic coordinates
         Args:
-            a: Primeira coordenada cúbica [x,y,z]
-            b: Segunda coordenada cúbica [x,y,z]
+            a: First cubic coordinate [x,y,z]
+            b: Second cubic coordinate [x,y,z]
 
         Returns:
 
-            Distância manhatan entre as coordenadas.
+            Manhattan distance between coordinates.
         """
         return ((abs(a[0] - b[0]) + abs(a[1] - b[1]) + abs(a[2] - b[2])) / 2)**2
 
     def oddr_to_cube(self, col, row):
         """
-        Transforma as coordenadas de retangulares em cúbicas.
+        Transforms rectangular coordinates to cubic.
 
         Args:
-            coord: Coordenada que deseja transformar.
+            coord: Coordinate you want to transform.
 
         Returns:
-            Coordenada cúbica no formato [x,y,z]
+            Cubic coordinate in [x,y,z] format
         """
 
         x = col - (row - (row & 1)) / 2
@@ -307,14 +305,14 @@ class Codebook(object):
 
     def generate_rec_lattice(self, n_rows, n_columns):
         """
-        Gera as coordenadas xy dos BMUs para um grid retangular.
+        Generates the xy coordinates of the BMUs for a rectangular grid.
 
         Args:
-            n_rows: Número de linhas do mapa kohonen.
-            n_columns: Número de colunas no mapa kohonen.
+            n_rows: Number of rows in the Kohonen map.
+            n_columns: Number of columns in the Kohonen map.
 
-        Returns:
-            Coordenadas do formato [x,y] para os bmus num grid retangular.
+        returns:
+            Coordinates in the [x,y] format for the BMUs in a rectangular grid.
         """
         x_coord = []
         y_coord = []
@@ -327,14 +325,13 @@ class Codebook(object):
 
     def generate_hex_lattice(self, n_columns, n_rows):
         """
-        Gera as coordenadas xy dos BMUs para um grid hexagonal odd-r.
+        Generates the xy coordinates of the BMUs for an odd-r hexagonal grid.
         Args:
-            n_rows:Número de linhas do mapa kohonen.
-            n_columns:Número de colunas no mapa kohonen.
+            n_rows: Number of rows in the Kohonen map.
+            n_columns: Number of columns in the Kohonen map.
 
         Returns:
-            Coordenadas do formato [x,y] para os bmus num grid hexagonal.
-
+            Coordinates in the [x,y] format for the bmus in a hexagonal grid.
         """
         ratio = np.sqrt(3) / 2
 

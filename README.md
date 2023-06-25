@@ -93,38 +93,40 @@ All functions in the IntraSOM library have documentation for input and output pa
 Example:
 ```
 >>> help(som_test.train)
+Help on method train in module intrasom.intrasom:
 
-    Método de classe para treinamento do objeto SOM.
+train(bootstrap=False, bootstrap_proportion=0.8, n_job=-1, save=True, summary=True, dtypes='parquet', shared_memory=False, train_rough_len=None, train_rough_radiusin=None, train_rough_radiusfin=None, train_finetune_len=None, train_finetune_radiusin=None, train_finetune_radiusfin=None, train_len_factor=1, maxtrainlen=1000, history_plot=False, previous_epoch=False) method of intrasom.intrasom.SOM instance
+    Class method for training the SOM object.
     
     Args:
-        n_job: número de trabalhos para usar e paralelizar o treinamento.
+        n_job: number of jobs to use and parallelize training.
     
-        shared_memory: bandeira para ativar a memória compartilhada.
+        shared_memory: flag to enable shared memory.
     
-        train_rough_len: Numero de iterações durante o treinamento bruto.
+        train_rough_len: number of iterations during rough training.
     
-        train_rough_radiusin: Raio inicial de busca de BMUs durante o
-            treinamento bruto.
+        train_rough_radiusin: initial BMU fetching radius during
+            rough training.
     
-        train_rough_radiusfin: Raio final de busca de BMUs durante o
-            treinamento bruto.
+        train_rough_radiusfin: BMU search final radius during
+            rough training.
     
-        train_finetune_len: Número de iterações durante o treinamento fino.
+        train_finetune_len: number of iterations during fine training.
     
-        train_finetune_radiusin: Raio inicial de busca de BMUs durante o
-            treinamento fino.
+        train_finetune_radiusin: initial BMU scan radius during
+            fine training.
     
-        train_finetune_radiusfin: Raio final de busca de BMUs durante o
-            treinamento fino.
+        train_finetune_radiusfin: BMU search final radius during
+            fine training.
     
-        train_len_factor: Fator que multiplica os valores de extensão do
-            treinamento (rought, fine, etc)
+        train_len_factor: factor that multiplies the values ​​of the training
+            extension (rough, fine, etc)
     
-        maxtrainlen: Valor máximo de interações desejado.
-            Default: np.Inf (infinito).
+        maxtrainlen: maximum value of desired interactions.
+            Default: np.Inf (infinity).
     
-    Retorna:
-        Objeto som treinado segundo os parâmetros escolhidos.
+    Returns:
+        SOM object trained according to the chosen parameters.
 ```
 
 -----

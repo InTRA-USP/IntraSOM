@@ -9,7 +9,7 @@ small = .000000000001
 class NeighborhoodFactory(object):
 
     """
-    Classe para criação do objeto de definição da função de vizinhança.
+    Class for creating the neighborhood function definition object.
     """
 
     @staticmethod
@@ -20,13 +20,13 @@ class NeighborhoodFactory(object):
                     return obj()
         else:
             raise Exception(
-                "Função de vizinhança não suportada '%s'" % neighborhood_func)
+                "Unsupported neighborhood function '%s'" % neighborhood_func)
 
 
 class GaussianNeighborhood(object):
 
     """
-    Criação de um objeto de definição da função de vizinhança gaussiana.
+    Creation of a Gaussian neighborhood function definition object.
     """
 
     name = 'gaussian'
@@ -60,7 +60,7 @@ class BubbleNeighborhood(object):
 
 class NormalizerFactory(object):
     """
-    Classe para a criação do objeto de normalização dos dados.
+    Class for creating the data normalization object.
     """
 
     @staticmethod
@@ -76,10 +76,10 @@ class NormalizerFactory(object):
 class Normalizer(object):
 
     """
-    Modelo de classe para implementação de novos objetos de normalização.
+    Class model for implementing new normalization objects.
     """
 
-    name = "Nome_objeto"
+    name = "Object_name"
 
     def normalize(self, data):
         raise NotImplementedError()

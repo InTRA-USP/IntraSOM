@@ -22,29 +22,29 @@ class Evaluation(object):
                           plot_roc = False,
                           save_roc=False):
         """
-        Retorna o dataframe de avaliação do aprendizado semi-supervisionado.
+        Returns the semi-supervised learning evaluation dataframe.
         Args:
-            data_test: Dados de teste, no formato dataframe ou numpy ndarray.
-            
-            bayesian_thresh: Falta implementar. Permite fazer avaliação bayesiana dos 
-                limiares.
+            data_test: Test data, in dataframe or numpy ndarray format.            
+
+            bayesian_thresh: Need to implement. Allows you to perform Bayesian evaluation of
+                thresholds.
         """
         
-        # Checar formatos para adaptação
+        # Check formats for adaptation
         if isinstance(data_test, pd.DataFrame):
             sample_names = data_test.index.values
             labels = [label for label in data_test.iloc[:,-self.pred_size:].columns]
             data_test = data_test.values
         elif isinstance(data_test, np.ndarray):
             data_test = data_test
-            sample_names = [f"Amostra_teste_{i}" for i in range(1,data_test.shape[0]+1)]
+            sample_names = [f"Test_sample_{i}" for i in range(1,data_test.shape[0]+1)]
             labels = [f"Var{i}" for i in range(self.pred_size)]
         else:
-            print("Somente os formatos DataFrame e Ndarray são aceitos como entrada")
+            print("Only DataFrame and ndarray formats are accepted as input")
         
-        # Rótulos verdadeiros
+        # True labels
         y_true = data_test[:,-self.pred_size:]
-        # Projetar valores
+        # Project values
         y_pred = self.som.project_nan_data(data_test, 
                                            with_labels=True, 
                                            save=False, 
@@ -67,76 +67,76 @@ class Evaluation(object):
             report_df["Thresh"] = np.array([thresh]*y_true.shape[1])
         
         if save:
-            print("Salvando...")
-            path = 'Avaliacao'
+            print("Saving...")
+            path = 'Evaluation'
             os.makedirs(path, exist_ok=True)
             if best_lim:
-                report_df.to_excel(f"Avaliacao/Avaliação_SOM_best_lim{self.name}.xlsx")
+                report_df.to_excel(f"Evaluation/Evaluation_SOM_best_lim{self.name}.xlsx")
             else:
-                report_df.to_excel(f"Avaliacao/Avaliação_SOM_{self.name}.xlsx")
+                report_df.to_excel(f"Evaluation/Evaluation_SOM_{self.name}.xlsx")
         if plot_roc:
             for i, label in enumerate(labels):
-                if report_df["Total de Positivos"].values[i]!=0:
+                if report_df["Total Positives"].values[i]!=0:
                     fper, tper, _ = roc_curve(y_true[:,i], y_pred[:,i])
                     roc_score = roc_auc_score(y_true[:,i], y_pred[:,i])
                     plt.figure(figsize=(7,7))
                     plt.plot(fper, tper, color='red', label='ROC')
                     plt.plot([0, 1], [0, 1], color='green', linestyle='--')
-                    plt.xlabel('Taxa de Falsos Positivos')
-                    plt.ylabel('Taxa de Verdadeiros Positivos')
+                    plt.xlabel('False Positive Rate')
+                    plt.ylabel('True Positive Rate')
                     plt.title(f"ROC {label[:10]}")
                     plt.text(0.4, 0.2, f"AUC:{round(roc_score,2)}", fontsize=12)
                     plt.legend()
                     if save_roc:
-                        path = 'Avaliacao/ROC'
+                        path = 'Evaluation/ROC'
                         os.makedirs(path, exist_ok=True)
-                        plt.savefig(f"Avaliacao/ROC/ROC_{label[:7]}.png", dpi=200)
+                        plt.savefig(f"Evaluation/ROC/ROC_{label[:7]}.png", dpi=200)
                     plt.show()
         
         return report_df
     
     def evaluate(self, y_pred, y_true, thresh, sample_names):
         """
-        Função para avaliar um treinamento semi-supervisionado. As métricas de avaliação são:
-        [COLOCAR UMA DEFINIÇÃO CURTA DE CADA UM DELES]
-        * Verdadeiros Negativos
-        * Falsos Negativos
-        * Verdadeiros Positivos
-        * Falsos Positivos
-        * Acurácia
-        * Total de Positivos
-        * Sensibilidade
-        * Especificidade
-        * Precisão
-        * Taxa de Falsos Positivos
-        * Taxa de Falsos Negativos
+        Function to evaluate a semi-supervised training. The evaluation metrics are:
+        [ADD A SHORT DEFINITION OF EACH OF THEM]
+        * True Negatives (TN)
+        * False Negatives (FN)
+        * True Positives (TP)
+        * False Positives (FP)
+        * Accuracy
+        * Total Positives
+        * Sensitivity
+        * Specificity
+        * Accuracy
+        * False Positive Rate
+        * False Negative Rate
 
         Args:
-            y_pred = valores dos rótulos preditos pelo modelo SOM.
+            y_pred = label values ​​predicted by the SOM model.
 
-            y_true = valores de rótulos verdadeiros, do conjunto de teste.
+            y_true = True label values ​​from the test set.
 
-            thresh = limiar para identificação dos rótulos como positivos ou negativos.
-                Aceita o formato de número ou uma lista, caso se queira aplicar uma 
-                lista de limiares diferentes para cada classificador.
-        
+            thresh = threshold for identifying labels as positive or negative.
+                Accepts number format or a list, if you want to apply a
+                list of different thresholds for each classifier.
 
-            sample_names = nomes dos classificadores, na mesma ordem que nos conjuntos de 
-                treinamento e teste.
 
-        Retorna:
-            Um dataframe com os classificadores nos índices e as métricas de treinamento
-            nas colunas.
+            sample_names = classifiers names, in the same order as in training
+                and testing sets.
+
+        Returns:
+            A dataframe with the classifiers in the indexes and the training metrics
+            in the columns.
         """
 
         def predict_label(y_pred, thresh):
             """
-            Função para predizer labels de treinamento a partir de um limiar.
+            Function to predict training labels from a threshold.
             """
             return np.where(y_pred > thresh, 1, 0)
         def divide_nonzero(num, den):
             """
-            Função para dividir valores por 0. O valor da divisão é 0.
+            Function to divide values ​​by 0. The division value is 0.
             """
             return np.divide(num, 
                              den, 
@@ -144,14 +144,14 @@ class Evaluation(object):
                              where=den!=0)
 
         if len([thresh]) == 1:
-            # Predizer os labels de acordo com o threshold
+            # Predict the labels according to the threshold
             y_pred_thresh = predict_label(y_pred, thresh)
         elif len([thresh]) > 1:
             y_pred_thresh = np.zeros(y_pred.shape)
             for i, ts in enumerate(thresh):
                 y_pred_thresh[i] = predict_label(y_pred[i], ts)
 
-        # Criar matriz de confusão para cada label
+        # Create confusion matrix for each label
         cm = multilabel_confusion_matrix(y_true, y_pred_thresh)
 
         # Separar TN, FN, TP e FP
@@ -176,63 +176,63 @@ class Evaluation(object):
         ACC = np.around((TP+TN)/(TP+FP+FN+TN)*100,2)
         # Recall
         REC = np.around(divide_nonzero(TP, PTV)*100,2)
-        # Criar DataFrame
+        # Create DataFrame
         evaluation = pd.DataFrame(index=sample_names)
 
         # Preencher DataFrame
-        evaluation["Verdadeiros Negativos"] = TN
-        evaluation["Falsos Negativos"] = FN
-        evaluation["Verdadeiros Positivos"] = TP
-        evaluation["Falsos Positivos"] = FP
-        evaluation["Total de Positivos"] = PTV
-        evaluation["Sensibilidade"] = TPR
-        evaluation["Especificidade"] = TNR
-        evaluation["Precisão"] = PPV
+        evaluation["True Negatives"] = TN
+        evaluation["False Negatives"] = FN
+        evaluation["True Positives"] = TP
+        evaluation["False Positives"] = FP
+        evaluation["Total Positives"] = PTV
+        evaluation["Sensitivity"] = TPR
+        evaluation["Specificity"] = TNR
+        evaluation["Accuracy"] = PPV
         evaluation["Recall"] = REC
-        evaluation["Taxa de Falsos Positivos"] = FPR
-        evaluation["Taxa de Falsos Negativos"] = FNR
-        evaluation["Acurácia"] = ACC
+        evaluation["False Positive Rate"] = FPR
+        evaluation["False Negative Rate"] = FNR
+        evaluation["Accuracy"] = ACC
 
 
         return evaluation
     
     def evaluate_thresh(self, data_test, labels=None, plot=False, save=False):
         """
-        Função para avaliar variação da acuração, taxa de falsos negativos e taxa de 
-        falsos positivos ao longo da variação de thresholds.
+        Function to evaluate variation in accuracy, rate of false negatives and rate of
+        false positives along the range of thresholds.
         """
         def predict_label(y_pred, thresh):
             """
-            Função para predizer labels de treinamento a partir de um limiar.
+            Function to predict training labels from a threshold.
             """
             return np.where(y_pred > thresh, 1, 0)
         def divide_nonzero(num, den):
             """
-            Função para dividir valores por 0. O valor da divisão é 0.
+            Function to divide values ​​by 0. The division value is 0.
             """
             return np.divide(num, 
                              den, 
                              out=np.zeros(num.shape, dtype=float), 
                              where=den!=0)
         
-        # Checar formatos para adptação
+        # Check formats for adaptation
         if isinstance(data_test, pd.DataFrame):
             sample_names = data_test.index
             data_test = data_test.values
         elif isinstance(data_test, np.ndarray):
             data_test = data_test
-            sample_names = [f"Amostra_teste_{i}" for i in range(1,data_test.shape[0]+1)]
+            sample_names = [f"Test_sample_{i}" for i in range(1,data_test.shape[0]+1)]
         else:
-            print("Somente os formatos DataFrame e Ndarray são aceitos como entrada")
+            print("Only DataFrame and ndarray formats are accepted as input")
         
-        # Rótulos verdadeiros
+        # True labels
         y_true = data_test[:,-self.pred_size:]
-        # Projetar valores
+        # Project values
         y_pred = self.som.project_nan_data(data_test, with_labels=True, save=False).iloc[:,-self.pred_size:].values
         
 
         best_lim = np.zeros(self.pred_size)
-        
+
         for i in range(self.pred_size):
             ACC = np.zeros(len(np.arange(0,1.0001,0.01)))
             FNR = np.zeros(len(np.arange(0,1.0001,0.01)))
@@ -266,22 +266,21 @@ class Evaluation(object):
             best_lim[i] = 0.01 if np.arange(0,1.001,0.01)[np.argmin(dist)] == 0 else np.arange(0,1.001,0.01)[np.argmin(dist)]
             
             if plot:
-                #Plotar
+                #Plot
                 plt.figure(figsize=(8,3))
-                plt.plot( np.arange(0,1.001,0.01), ACC, label="Acurácia")
-                plt.plot(np.arange(0,1.001,0.01), FNR, label="Taxa de Falsos Negativos")
-                plt.plot(np.arange(0,1.001,0.01), FPR, label="Taxa de Falsos Positivos")
+                plt.plot( np.arange(0,1.001,0.01), ACC, label="Accuracy")
+                plt.plot(np.arange(0,1.001,0.01), FNR, label="False Negative Rate")
+                plt.plot(np.arange(0,1.001,0.01), FPR, label="False Positive Rate")
                 plt.vlines(best_lim[i], 0,100, linestyles ="solid", colors ="k")
-                plt.title(f"Avaliação Limiar: {labels[label_index]}")
-                plt.xlabel("Limiares")
-                plt.ylabel("Taxas")
+                plt.title(f"Threshold Evaluation: {labels[label_index]}")
+                plt.xlabel("Thresholds")
+                plt.ylabel("Rates")
                 #plt.xlim(0,0.11)
                 plt.legend()
                 if save:
-                    path = 'Avaliacao/best_lim'
+                    path = 'Evaluation/best_lim'
                     os.makedirs(path, exist_ok=True)
-                    plt.savefig(f"Avaliacao/best_lim/best_lim_{labels[label_index][:7]}.png", dpi=200)
+                    plt.savefig(f"Evaluation/best_lim/best_lim_{labels[label_index][:7]}.png", dpi=200)
             
         return best_lim
-     
             

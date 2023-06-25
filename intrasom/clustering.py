@@ -24,7 +24,7 @@ class ClusterFactory(object):
         self.codebook = som_object.codebook.matrix
         self.mapsize = som_object.mapsize
         self.bmus = som_object._bmu[0].astype(int)
-        self.bmu_matrix = som_object.bmu_matrix
+        self.neuron_matrix = som_object.neuron_matrix
         self.component_names = som_object.component_names
         self.unit_names = som_object._unit_names
         self.neurons_dataframe = som_object.neurons_dataframe
@@ -35,21 +35,21 @@ class ClusterFactory(object):
 
     def kmeans(self, k=3, init = "random", n_init=5, max_iter=200):
         """
-        Executa o algoritmo K-means para agrupamento dos dados de do mapa kohonen treinado.
+        Runs the K-means algorithm for grouping data from the trained kohonen map.
 
         Args:
-            k (int, optional): O número de clusters desejados. O padrão é 3.
-            init (str, optional): Método de inicialização dos centroides. Pode ser 'random' para inicialização aleatória 
-                                ou 'k-means++' para inicialização inteligente. O padrão é 'random'.
-            n_init (int, optional): Número de vezes que o algoritmo K-means será executado com diferentes centroides 
-                                    iniciais. O resultado final será o melhor obtido dentre as execuções. 
-                                    O padrão é 5.
-            max_iter (int, optional): Número máximo de iterações do algoritmo K-means para cada execução. 
-                                    O padrão é 200.
+            k (int, optional): The number of desired clusters. The default is 3.
+            init (str, optional): Centroid initialization method. Can be 'random' for random startup
+                                or 'k-means++' for smart initialization. The default is 'random'.
+            n_init (int, optional): Number of times the K-means algorithm will be executed with different initial
+                                    centroids. The final result will be the best obtained among the executions.
+                                    The default is 5.
+            max_iter (int, optional): Maximum number of iterations of the K-means algorithm for each execution.
+                                    The default is 200.
 
         Returns:
-            numpy.ndarray: Uma matriz bidimensional contendo os rótulos dos clusters atribuídos a cada ponto de dados. 
-                        Os rótulos estão no intervalo [1, k]. A forma da matriz é (self.mapsize[1], self.mapsize[0]).
+            numpy.ndarray: A two-dimensional array containing the cluster labels assigned to each data point.
+                        The labels are in the range [1, k]. The form of the array is (self.mapsize[1], self.mapsize[0]).
         """
 
 
@@ -59,14 +59,14 @@ class ClusterFactory(object):
     
     def results_cluster(self, clusters, save=True):
         """
-        Retorna um DataFrame contendo os resultados do agrupamento dos dados, com a adição dos rótulos de cluster atribuídos.
+        Returns a DataFrame containing the results of grouping the data, with the addition of the assigned cluster labels.
 
         Args:
-            clusters (numpy.ndarray): Uma matriz unidimensional contendo os rótulos de cluster atribuídos a cada ponto de dado.
-            save (bool, optional): Indica se os resultados devem ser salvos em um arquivo Excel. O padrão é True.
+            clusters (numpy.ndarray): A one-dimensional array containing the cluster labels assigned to each data point.
+            save (bool, optional): Indicates whether the results should be saved in an Excel file. The default is True.
 
         Returns:
-            pandas.DataFrame: Um DataFrame contendo os resultados do agrupamento dos dados, incluindo os rótulos de cluster atribuídos. 
+            pandas.DataFrame: A DataFrame containing the results of clustering the data, including the assigned cluster labels.
         """
 
         df = self.neurons_dataframe.copy()
@@ -76,9 +76,9 @@ class ClusterFactory(object):
         df.set_index(self.sample_names, inplace=True)
 
         if save:
-            path = 'Resultados'
+            path = 'Results'
             os.makedirs(path, exist_ok=True)
-            df.to_excel(f"Resultados/{self.name}_resultados_{clusters.max()}_clusters.xlsx")
+            df.to_excel(f"Results/{self.name}_results_{clusters.max()}_clusters.xlsx")
 
         return df
             
@@ -108,55 +108,55 @@ class ClusterFactory(object):
                     return_geodataframe=False,
                     auto_adjust_text =False):
         """
-        Plota um gráfico com os clusters resultantes da execução do algoritmo K-means.
+        Plots a graph with the clusters resulting from the execution of the K-means algorithm.
 
-        Parâmetros:
-        - clusters: ndarray ou lista bidimensional
-            Array ou lista bidimensional contendo os clusters gerados pelo algoritmo K-means.
-        - figsize: tuple, opcional
-            Tamanho da figura (largura, altura). O padrão é (16, 14).
-        - title_size: int, opcional
-            Tamanho da fonte do título. O padrão é 25.
-        - title_pad: int, opcional
-            Espaçamento entre o título e o topo do gráfico. O padrão é 40.
-        - legend_text_size: int, opcional
-            Tamanho da fonte do texto da legenda. O padrão é 10.
-        - save: bool, opcional
-            Indica se o gráfico deve ser salvo em um arquivo. O padrão é False.
-        - file_name: str, opcional
-            Nome do arquivo a ser salvo. O padrão é None.
-        - file_path: bool, opcional
-            Indica se o caminho do arquivo deve ser incluído ao salvar. O padrão é False.
-        - watermark_neurons: bool, opcional
-            Indica se os números de BMUs devem ser exibidos como marca d'água no gráfico. O padrão é False.
-        - neurons_fontsize: int, opcional
-            Tamanho da fonte dos números de BMUs. O padrão é 12.
-        - umatrix: bool, opcional
-            Indica se a matriz U deve ser plotada no gráfico. O padrão é False.
-        - hits: bool, opcional
-            Indica se os hits devem ser plotados no gráfico. O padrão é False.
-        - alfa_clust: float, opcional
-            Valor de transparência dos clusters no gráfico. O padrão é 0.5.
-        - log: bool, opcional
-            Indica se a matriz U deve ser plotada em escala logarítmica. O padrão é False.
-        - colormap: str, opcional
-            Nome do mapa de cores a ser utilizado no gráfico. O padrão é "gist_rainbow".
-        - clusters_highlight: list, opcional
-            Lista contendo os clusters que devem ser destacados no gráfico. O padrão é [].
-        - legend_title_size: int, opcional
-            Tamanho da fonte do título da legenda. O padrão é 12.
-        - cluster_outline: bool, opcional
-            Indica se as bordas dos clusters devem ser desenhadas no gráfico. O padrão é False.
-        - plot_labels: bool, opcional
-            Indica se as etiquetas devem ser plotadas no gráfico. O padrão é False.
-        - custom_labels: list, opcional
-            Lista contendo as etiquetas personalizadas para cada ponto no gráfico. O padrão é [].
-        - clusterout_maxtext_size: int, opcional
-            Tamanho máximo do texto do cluster no gráfico. O padrão é 12.
-        - return_geodataframe: bool, opcional
-            Indica se o GeoDataFrame deve ser retornado. O padrão é False.
-        - auto_adjust_text: bool, opcional
-            Indica se o ajuste automático do texto deve ser ativado. O padrão é False.
+        Parameters:
+        - clusters: ndarray or 2-dimensional list
+            Array or 2-dimensional list containing the clusters generated by the K-means algorithm.
+        - figsize: tuple, optional
+            Figure size (width, height). Default is (16, 14).
+        - title_size: int, optional
+            Font size of the title. Default is 25.
+        - title_pad: int, optional
+            Spacing between the title and the top of the graph. Default is 40.
+        - legend_text_size: int, optional
+            Font size of the legend text. Default is 10.
+        - save: bool, optional
+            Indicates whether the graph should be saved to a file. Default is False.
+        - file_name: str, optional
+            Name of the file to be saved. Default is None.
+        - file_path: bool, optional
+            Indicates whether the file path should be included when saving. Default is False.
+        - watermark_neurons: bool, optional
+            Indicates whether the BMU numbers should be displayed as a watermark on the graph. Default is False.
+        - neurons_fontsize: int, optional
+            Font size of the BMU numbers. Default is 12.
+        - umatrix: bool, optional
+            Indicates whether the U-matrix should be plotted on the graph. Default is False.
+        - hits: bool, optional
+            Indicates whether the hits should be plotted on the graph. Default is False.
+        - alfa_clust: float, optional
+            Transparency value of the clusters in the graph. Default is 0.5.
+        - log: bool, optional
+            Indicates whether the U-matrix should be plotted on a logarithmic scale. Default is False.
+        - colormap: str, optional
+            Name of the colormap to be used in the graph. Default is "gist_rainbow".
+        - clusters_highlight: list, optional
+            List containing the clusters that should be highlighted in the graph. Default is [].
+        - legend_title_size: int, optional
+            Font size of the legend title. Default is 12.
+        - cluster_outline: bool, optional
+            Indicates whether the cluster outlines should be drawn on the graph. Default is False.
+        - plot_labels: bool, optional
+            Indicates whether the labels should be plotted on the graph. Default is False.
+        - custom_labels: list, optional
+            List containing custom labels for each point on the graph. Default is [].
+        - clusterout_maxtext_size: int, optional
+            Maximum size of the cluster text on the graph. Default is 12.
+        - return_geodataframe: bool, optional
+            Indicates whether the GeoDataFrame should be returned. Default is False.
+        - auto_adjust_text: bool, optional
+            Indicates whether automatic text adjustment should be enabled. Default is False.
         """
         
 
@@ -188,11 +188,11 @@ class ClusterFactory(object):
         if umatrix:
             if hits:
                 bmu_dic = self.hits_dictionary
-            # Matriz U
+            # U Matrix
             um = self.build_umatrix(expanded = True, log=log)
             umat = self.build_umatrix(expanded = False, log=log)
 
-            # Normalizar as cores para todos os hexagonos
+            # Normalize the colors for all hexagons
             norm = mpl.colors.Normalize(vmin=np.nanmin(um), vmax=np.nanmax(um))
             counter = 0
 
@@ -200,7 +200,7 @@ class ClusterFactory(object):
 
             for j in range(self.mapsize[1]):
                 for i in range(self.mapsize[0]):
-                    # Hexagono Central
+                    # Central Hexagon
                     hexagon = RegularPolygon((xx[(j, i)]*2,
                                           yy[(j,i)]*2),
                                          numVertices=6,
@@ -211,7 +211,7 @@ class ClusterFactory(object):
 
                     ax.add_patch(hexagon)
 
-                    # Hexagono da Direita
+                    # Right Hexagon
                     if not np.isnan(um[j, i, 0]):
                         hexagon = RegularPolygon((xx[(j, i)]*2+1,
                                               yy[(j,i)]*2),
@@ -222,7 +222,7 @@ class ClusterFactory(object):
                                              zorder=0)
                         ax.add_patch(hexagon)
 
-                    # Hexagono Superior Direita
+                    # Upper Right Hexagon
                     if not np.isnan(um[j, i, 1]):
                         hexagon = RegularPolygon((xx[(j, i)]*2+0.5,
                                               yy[(j,i)]*2+(np.sqrt(3)/2)),
@@ -233,7 +233,7 @@ class ClusterFactory(object):
                                              zorder=0)
                         ax.add_patch(hexagon)
 
-                    # Hexagono Superior Esquerdo
+                    # Upper Left Hexagon
                     if not np.isnan(um[j, i, 2]):
                         hexagon = RegularPolygon((xx[(j, i)]*2-0.5,
                                               yy[(j,i)]*2+(np.sqrt(3)/2)),
@@ -244,7 +244,7 @@ class ClusterFactory(object):
                                              zorder=0)
                         ax.add_patch(hexagon)
 
-                    #Plotar hits
+                    # Plot hits
                     if hits:
                         try:
                             hexagon = RegularPolygon((xx[(j, i)]*2,
@@ -278,7 +278,7 @@ class ClusterFactory(object):
                     if label not in cluster_vertices_dict:
                         cluster_vertices_dict[label] = []
                     
-                    # Get the vertices of the hexagonagon
+                    # Get the vertices of the hexagon
                     hexagon = RegularPolygon((xx[(j, i)]*2, yy[(j,i)]*2), 
                                         numVertices=6, 
                                         radius=2/np.sqrt(3)+0.04,
@@ -289,10 +289,10 @@ class ClusterFactory(object):
                     cluster_vertices_dict[label].append(polygon)
 
                     if watermark_neurons:
-                        # Para utilização no plot do número de bmus
+                        # For use in BMUs number plot
                         nnodes = self.mapsize[0] * self.mapsize[1]
                         grid_bmus = np.linspace(1,nnodes, nnodes).reshape(self.mapsize[1], self.mapsize[0])
-                        # Hexagono Central
+                        # Central Hexagon
                         hexagon = RegularPolygon((xx[(j, i)]*2,
                                                 yy[(j,i)]*2),
                                                 numVertices=6,
@@ -339,10 +339,10 @@ class ClusterFactory(object):
                     ax.add_patch(hexagon)
                 
                     if watermark_neurons:
-                        # Para utilização no plot do número de bmus
+                        # For use in neurons number plot
                         nnodes = self.mapsize[0] * self.mapsize[1]
                         grid_bmus = np.linspace(1,nnodes, nnodes).reshape(self.mapsize[1], self.mapsize[0])
-                        # Hexagono Central
+                        # Central Hexagon
                         hexagon = RegularPolygon((xx[(j, i)]*2,
                                                 yy[(j,i)]*2),
                                                 numVertices=6,
@@ -506,13 +506,13 @@ class ClusterFactory(object):
                         
 
 
-        #Parâmetros de plotagem
+        # Plotting Parameters
         ax.set_xlim(-0.6-0.5, 2*self.mapsize[0]-0.5+0.6)
         ax.set_ylim(-0.5660254-0.81, 2*self.mapsize[1]*0.8660254-2*0.560254+0.75)
         ax.set_axis_off()
         ax.invert_yaxis()
 
-        plt.title(f"Matriz de Agrupamentos - {clusters.max()} grupos",
+        plt.title(f"Clustering Matrix - {clusters.max()} clusters",
                   horizontalalignment='center',  
                   verticalalignment='top', 
                   size=title_size, 
@@ -622,7 +622,7 @@ class ClusterFactory(object):
                     break
 
         
-        ax2.set_title(legend_title if legend_title!=False else "Legenda", 
+        ax2.set_title(legend_title if legend_title!=False else "Legend", 
                       fontdict={"fontsize": legend_title_size},
                       loc="center", 
                       pad=5,
@@ -648,10 +648,10 @@ class ClusterFactory(object):
             if file_path:
                 f.savefig(f"{file_path}/{file_name}.jpg",dpi=300, bbox_inches = "tight")
             else:
-                path = 'Plotagens/Clusters'
+                path = 'Plots/Clusters'
                 os.makedirs(path, exist_ok=True)
 
-                f.savefig(f"Plotagens/Clusters/{file_name}.jpg",dpi=300, bbox_inches = "tight")
+                f.savefig(f"Plots/Clusters/{file_name}.jpg",dpi=300, bbox_inches = "tight")
         
         if return_geodataframe:
             return gdf
@@ -659,13 +659,13 @@ class ClusterFactory(object):
 
     def generate_hex_lattice(self, n_columns, n_rows):
         """
-        Gera as coordenadas xy dos BMUs para um grid hexagonal odd-r.
+        Generates the xy coordinates of the BMUs for an odd-r hexagonal grid.
         Args:
-            n_rows:Número de linhas do mapa kohonen.
-            n_columns:Número de colunas no mapa kohonen.
+            n_rows: Number of lines in the Kohonen map.
+            n_columns: Number of columns in the Kohonen map.
 
         Returns:
-            Coordenadas do formato [x,y] para os bmus num grid hexagonal.
+            Coordinates of the [x,y] format for the BMUs in a hexagonal grid.
 
         """
         ratio = np.sqrt(3) / 2
@@ -687,34 +687,35 @@ class ClusterFactory(object):
 
     def build_umatrix(self, expanded=False, log=False):
         """
-        Função para calcular a Matriz U de distâncias unificadas a partir da
-        matriz de pesos treinada.
+        Function to calculate the U Matrix of unified distances from the
+        trained weight matrix.
 
         Args:
-            exapanded: valor booleano para indicar se o retorno será da matriz
-                de distâncias unificadas resumida (média das distâncias dos 6
-                bmus de vizinhança) ou expandida (todos os valores de distância)
-        Retorna:
-            Matriz de distâncias unificada expandida ou resumida.
+            expanded: boolean value to indicate whether the return will be from the summarized
+                or unified matrix of distances (average of distances from the 6
+                neighborhood BMUs) or expanded (all distance values)
+                
+        Returns:
+            Expanded or summarized unified distance matrix.
         """
-        # Função para encontrar distancia rápido
+        # Function to find distance quickly
         def fast_norm(x):
             """
-            Retorna a norma L2 de um array 1-D.
+            Returns the L2 norm of a 1-D array.
             """
             return sqrt(dot(x, x.T))
 
-        # Matriz de pesos bmus
+        # Matrix of BMUs weights
         weights = np.reshape(self.codebook, (self.mapsize[1], self.mapsize[0], self.codebook.shape[1]))
 
-        # Busca hexagonal vizinhos
+        # Neighbor hexagonal search
         ii = [[1, 1, 0, -1, 0, 1], [1, 0,-1, -1, -1, 0]]
         jj = [[0, 1, 1, 0, -1, -1], [0, 1, 1, 0, -1, -1]]
 
-        # Inicializar Matriz U
+        # Initialize U Matrix
         um = np.nan * np.zeros((weights.shape[0], weights.shape[1], 6))
 
-        # Preencher matriz U
+        # Fill U Matrix
         for y in range(weights.shape[0]):
             for x in range(weights.shape[1]):
                 w_2 = weights[y, x]
@@ -724,27 +725,27 @@ class ClusterFactory(object):
                         w_1 = weights[y+j, x+i]
                         um[y, x, k] = fast_norm(w_2-w_1)
         if expanded:
-            # Matriz U expandida
+            # Expanded U matrix
             return np.log(um) if log else um
         else:
-            # Matriz U reduzida
+            # Reduced U matrix
             return nanmean(np.log(um), axis=2) if log else nanmean(um, axis=2)
         
 
     @property
     def hits_dictionary(self):
         """
-        Função para criar um dicionário de hits dos vetores de entrada para
-        cada um de seus bmus, proporcional ao tamanho da plotagem.
+        Function to create a dictionary of hits from the input vectors for
+        each of its BMUs, proportional to the size of the plot.
         """
-        # Contagem de hits
+        # Hit count
         unique, counts = np.unique(self.bmus, return_counts=True)
 
-        # Normalizar essa contagem de 0.5 a 2.0 (de um hexagono pequeno até um
-        #hexagono que cobre metade dos vizinhos).
+        # Normalize this count from 0.5 to 2.0 (from a small hexagon to a
+        # hexagon that covers half of the neighbors).
         counts = minmax_scale(counts, feature_range = (0.5,2))
 
         return dict(zip(unique, counts))
 
-# Erro Kmeans
+# K-Means error
 os.environ["OMP_NUM_THREADS"] = "2"

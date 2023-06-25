@@ -32,7 +32,7 @@ class PlotFactory(object):
         self.codebook = som_object.codebook.matrix
         self.mapsize = som_object.mapsize
         self.bmus = som_object._bmu[0].astype(int)
-        self.bmu_matrix = som_object.bmu_matrix
+        self.neuron_matrix = som_object.neuron_matrix
         self.component_names = som_object._component_names
         self.sample_names = som_object._sample_names
         self.unit_names = som_object._unit_names
@@ -46,40 +46,39 @@ class PlotFactory(object):
 
     def build_umatrix(self, expanded=False, log=False):
         """
-        Função para calcular a Matriz U de distâncias unificadas a partir da
-        matriz de pesos treinada.
+        Function to calculate the U-Matrix of unified distances from the trained weight matrix.
 
         Args:
-            exapanded: valor booleano para indicar se o retorno será da matriz
-                de distâncias unificadas resumida (média das distâncias dos 6
-                bmus de vizinhança) ou expandida (todos os valores de distância)
+            exapanded: Boolean value to indicate whether the return will be the summarized 
+                U-Matrix (average distances of the 6 neighboring BMUs) or the expanded 
+                U-Matrix (all distance values).
             
-            log: retorna o logaritmo de base 10 para os valores de distância. É 
-                utilizado na presença de amostras com uma fronteira de dissimilaridade
-                muito grande que mascara a visualização da matriz-U. A transformada 
-                logaritmica desses valores permite uma melhor visualização dessa matriz.
+            log: Returns the base 10 logarithm for the distance values. It is used when 
+                there are samples with a large dissimilarity boundary that masks the 
+                visualization of the U-Matrix. The logarithmic transformation of these 
+                values allows for a better visualization of the matrix.
 
-        Retorna:
-            Matriz de distâncias unificada expandida ou resumida.
+        Returns:
+            Expanded or summarized U-Matrix of distances.
         """
-        # Função para encontrar distancia rápido
+        # Function to find distance quickly
         def fast_norm(x):
             """
-            Retorna a norma L2 de um array 1-D.
+            Returns the L2 norm of a 1-D array.
             """
             return sqrt(dot(x, x.T))
 
-        # Matriz de pesos bmus
+        # Neurons weights matrix
         weights = np.reshape(self.codebook, (self.mapsize[1], self.mapsize[0], self.codebook.shape[1]))
 
-        # Busca hexagonal vizinhos
+        # Neighbor hexagonal search
         ii = [[1, 1, 0, -1, 0, 1], [1, 0,-1, -1, -1, 0]]
         jj = [[0, 1, 1, 0, -1, -1], [0, 1, 1, 0, -1, -1]]
 
-        # Inicializar Matriz U
+        # Initialize U Matrix
         um = np.nan * np.zeros((weights.shape[0], weights.shape[1], 6))
 
-        # Preencher matriz U
+        # Fill U-matrix
         for y in range(weights.shape[0]):
             for x in range(weights.shape[1]):
                 w_2 = weights[y, x]
@@ -89,19 +88,19 @@ class PlotFactory(object):
                         w_1 = weights[y+j, x+i]
                         um[y, x, k] = fast_norm(w_2-w_1)
         if expanded:
-            # Matriz U expandida
+            # Expanded U Matrix
             return np.log(um) if log else um
         else:
-            # Matriz U reduzida
+            # Reduced U Matrix
             return nanmean(np.log(um), axis=2) if log else nanmean(um, axis=2)
                         
     def plot_umatrix(self,
                      figsize = (10,10),
                      hits = True,
-                     title = "Matriz U",
+                     title = "U-Matrix",
                      title_size = 40,
                      title_pad = 25,
-                     legend_title = "Distância",
+                     legend_title = "Distance",
                      legend_title_size = 25,
                      legend_ticks_size = 20,
                      save = True,
@@ -121,77 +120,73 @@ class PlotFactory(object):
                      label_title_xy = (0,0.5),
                      log=False):
         """
-        Função para plotar a Matriz U de distâncias unificadas.
+        Function to plot the U-Matrix of unified distances.
 
         Args:
-            figsize: tamanho da área de plotagem da matriz U. O ajusto desses valores
-                é fundamental para a melhor distribuição dos objetos sendo plotados e varia
-                fortemente com o formato do mapa treinado (número de linhas e colunas).
-                 Padrão: (10, 10)
+            figsize:  Size of the U-Matrix plotting area. The adjustment of these values is 
+                crucial for the proper distribution of the plotted objects and strongly depends 
+                on the shape of the trained map (number of rows and columns). Default: (10, 10)
 
-            hits: booleano para indicar a plotagem dos hits dos vetores de entrada 
-                nos BMUs (proporcionais à quantidade de vetores por BMU). Esses hits 
-                são visualizados na plotagem na forma de hexagonos brancos com tamanho
-                proporcial ao número de amostras de entrada que são representadas por 
-                aquele BMU.
+            hits: Boolean value to indicate whether to plot the hits of input vectors on the 
+                BMUs (proportional to the number of vectors per BMU). These hits are visualized as 
+                white hexagons with size proportional to the number of input samples represented 
+                by that BMU.
 
-            title: título da figura criada. Padrão: "Matriz U"
+            title: Title of the created figure. Default: "U-Matrix"
 
-            title_size: tamanho do título plotado. Padrão: 40
+            title_size: Size of the plotted title. Default: 40
 
-            title_pad: espaçamento entre o título e a parte superior da matriz. Padrão: 25
+            title_pad: Spacing between the title and the top of the matrix. Default: 25
 
-            legend_title: título da barra de cores de legenda. Padrão: "Distância"
+            legend_title: Title of the legend color bar. Default: "Distance"
 
-            legend_title_size: tamanho do título da legenda. Padrão: 25
+            legend_title_size: Size of the legend title. Default: 25
 
-            legend_ticks_size: tamanho dos algarismos da barra de cores da legenda. Padrão: 20
+            legend_ticks_size: Size of the digits on the legend color bar. Default: 20
 
-            save: booleano para definir o salvamento da imagem criada. O salvamento será feito 
-                no diretório (Plotagens/Matriz_U). Padrão: True
+            save: Boolean value to define whether to save the created image. The image will be saved in the 
+                directory (Plotagens/Matriz_U). Default: True
 
-            watermark_neurons: booleano para adicionar marca d'água com os números dos neurônios 
-                na imagem. Padrão: False
+            watermark_neurons: Boolean value to add a watermark with the neuron numbers to the image. 
+                Default: False
 
-            watermark_neurons_alfa: valor entre 0 e 1 indicando a transparência do template de neurônios
-                plotados sobre a matriz-U. Quanto mais próximo de 1 menor a transparência. Padrão: 0.5.
+            watermark_neurons_alfa: Value between 0 and 1 indicating the transparency of the plotted 
+                neuron template over the U-Matrix. The closer to 1, the lower the transparency. Default: 0.5.
 
-            neurons_fontsize: tamanho da fonte com o número dos neurônios a serem plotados. Padrão:7.
-                     
-            file_name: nome que será dado ao arquivo salvo. Se nenhum nome for fornecido, será 
-                utilizado o nome do projeto.
+            neurons_fontsize: Font size for the neuron numbers to be plotted. Default: 7.
 
-            file_path: caminho no sistema em que a imagem deverá ser salva, caso não se opte por 
-                utilizar o caminho padrão.
+            file_name: Name to be given to the saved file. If no name is provided, the project name 
+                will be used.
 
-            resume: booleano para plotar apenas a parte superior da matriz U, omitindo a parte 
-                inferior espelhada. Padrão: False
+            file_path: System path where the image should be saved, if a custom path is preferred.
 
-            label_plot: booleano para adicionar rótulos aos hexágonos da matriz U segundo uma variável 
-                booleana presente no treinamento. Padrão: False
-            
-            label_plot_names: nome da variável para a plotagem. A presença da variável é indicada 
-                por hits de cor branca, e a ausência por hits de cor preta. Padrão: None
+            resume: Boolean value to plot only the upper part of the U-Matrix, omitting the mirrored 
+                lower part. Default: False
 
-            samples_label: booleano para indicar a plotagem de rótulos de amostras selecionadas.
-             Padrão: False.
-            
-            samples_label_index: lista de indices das amostras selecionadas para plotagem de rótulos.
-             Padrão: None. "All" para plotagem de todas as amostras.
-            
-            samples_label_fontsize: tamanho da fonte dos rótulos plotados. Padrão: 8.
-            
-            save_labels_rep: booleano para indicação do salvamento de um arquivo .txt em Resultados
-             com as amostras selecionadas e a sua ordem de representatividade em cada BMU. Padrão: False.
-            
-            label_title_xy: coordenadas (x, y) para posicionar o título dos rótulos. Padrão: (-0.02, 1.1)
-            
-            log: booleano para plotar a matriz U em escala logarítmica para melhor visualização das 
-                fronteiras de dissimilaridade na presença de outliers.
+            label_plot: Boolean value to add labels to the hexagons of the U-Matrix according to a 
+                boolean variable present in the training. Default: False
 
+            label_plot_names: Name of the variable for plotting. The presence of the variable is 
+                indicated by white hits, and the absence by black hits. Default: None
 
-        Retorna:
-            A imagem com a plotagem da Matriz U de distâncias unificadas.
+            samples_label: Boolean value to indicate the plotting of labels for selected samples. 
+                Default: False.
+
+            samples_label_index: List of indices of the selected samples for label plotting. 
+                Default: None. "All" for plotting all samples.
+
+            samples_label_fontsize: Font size for the plotted labels. Default: 8.
+
+            save_labels_rep: Boolean value to indicate whether to save a .txt file in Results with 
+                the selected samples and their representativeness order in each BMU. Default: False.
+
+            label_title_xy: Coordinates (x, y) to position the label title. Default: (-0.02, 1.1)
+
+            log: Boolean value to plot the U-Matrix on a logarithmic scale for better visualization 
+                of dissimilarity boundaries in the presence of outliers.
+
+        Returns:
+            The image with the plot of the U-Matrix of unified distances.
         """
         def select_keys(original_dict, keys_list):
             new_dict = {}
@@ -220,35 +215,35 @@ class PlotFactory(object):
             return found_string, found_index
 
         if file_name is None:
-            file_name = f"Matriz_U_{self.name}"
+            file_name = f"U_Matrix_{self.name}"
 
         if hits:
             bmu_dic = self.hits_dictionary
 
-        # Criar coordenadas
+        # Create coordinates
         xx = np.reshape(self.generate_hex_lattice(self.mapsize[0], self.mapsize[1])[:,0], (self.mapsize[1], self.mapsize[0]))
         yy = np.reshape(self.generate_hex_lattice(self.mapsize[0], self.mapsize[1])[:,1], (self.mapsize[1], self.mapsize[0]))
 
-        # Matriz U
+        # U Matrix
         um = self.build_umatrix(expanded = True, log=log)
         umat = self.build_umatrix(expanded = False, log=log)
         
         
         if resume:
-            # Plotagem
+            # Plotting
             prop = self.mapsize[1]*0.8660254/self.mapsize[0]
             f = plt.figure(figsize=(5, 5*prop), dpi=300)
             f.patch.set_facecolor('blue')
             ax = f.add_subplot()
             ax.set_aspect('equal')
 
-            # Normalizar as cores para todos os hexagonos
+            # Normalize colors for all hexagons
             norm = mpl.colors.Normalize(vmin=np.nanmin(um), vmax=np.nanmax(um))
             counter = 0
 
             for j in range(self.mapsize[1]):
                 for i in range(self.mapsize[0]):
-                    # Hexagono Central
+                    # Central Hexagon
                     hex = RegularPolygon((xx[(j, i)]*2,
                                           yy[(j,i)]*2),
                                          numVertices=6,
@@ -258,7 +253,7 @@ class PlotFactory(object):
 
                     ax.add_patch(hex)
 
-                    # Hexagono da Direita
+                    # Upper Right Hexagon
                     if not np.isnan(um[j, i, 0]):
                         hex = RegularPolygon((xx[(j, i)]*2+1,
                                               yy[(j,i)]*2),
@@ -268,7 +263,7 @@ class PlotFactory(object):
                                              alpha=1)
                         ax.add_patch(hex)
 
-                    # Hexagono Superior Direita
+                    # Upper Left Hexagon
                     if not np.isnan(um[j, i, 1]):
                         hex = RegularPolygon((xx[(j, i)]*2+0.5,
                                               yy[(j,i)]*2+(np.sqrt(3)/2)),
@@ -291,7 +286,7 @@ class PlotFactory(object):
 
                     
                     if j==0:
-                        # Hexagono Central
+                        # Central Hexagon
                         hex = RegularPolygon((xx[(j, i)]*2,
                                               yy[(j,i)]*2+(0.8660254*self.mapsize[1]*2)),
                                              numVertices=6,
@@ -300,7 +295,7 @@ class PlotFactory(object):
                                              alpha=1)#, edgecolor='black')
                         ax.add_patch(hex)
                         
-                        # Direita
+                        # Right
                         if not np.isnan(um[j, i, 0]):
                             hex = RegularPolygon((xx[(j, i)]*2+1,
                                                   yy[(j,i)]*2+(0.8660254*self.mapsize[1]*2)),
@@ -310,7 +305,7 @@ class PlotFactory(object):
                                                  alpha=1)
                             ax.add_patch(hex)
                             
-                        # Hexagono Inferior Direito
+                        # Lower Right Hexagon
                         if not np.isnan(um[j, i, 1]):
                             hex = RegularPolygon((xx[(j, i)]*2+0.5,
                                                   yy[(j,i)]*2-(np.sqrt(3)/2)+(0.8660254*self.mapsize[1]*2)),
@@ -320,7 +315,7 @@ class PlotFactory(object):
                                                  alpha=1)
                             ax.add_patch(hex)
                             
-                        # Hexagono Inferior Esquerdo
+                        # Bottom Left Hexagon
                         if not np.isnan(um[j, i, 2]):
                             hex = RegularPolygon((xx[(j, i)]*2-0.5,
                                                   yy[(j,i)]*2-(np.sqrt(3)/2)+(0.8660254*self.mapsize[1]*2)),
@@ -330,7 +325,7 @@ class PlotFactory(object):
                                                  alpha=1)
                             ax.add_patch(hex)
                     if i==0:
-                        # Hexagono Central
+                        # Central Hexagon
                         hex = RegularPolygon((xx[(j, i)]*2 + self.mapsize[0]*2 - 1,
                                               yy[(j,i)]*2),
                                              numVertices=6,
@@ -339,7 +334,7 @@ class PlotFactory(object):
                                              alpha=1)#, edgecolor='red')
                         ax.add_patch(hex)
                         
-                        # Direita
+                        # Right
                         if not np.isnan(um[j, i, 0]):
                             hex = RegularPolygon((xx[(j, i)]*2 + self.mapsize[0]*2,
                                                   yy[(j,i)]*2),
@@ -349,7 +344,7 @@ class PlotFactory(object):
                                                  alpha=1)
                             ax.add_patch(hex)
                                                  
-                        # Hexagono Superior Direito
+                        # Upper Right Hexagon
                         if not np.isnan(um[j, i, 1]):
                             hex = RegularPolygon((xx[(j, i)]*2 + self.mapsize[0]*2 - 0.5,
                                                   yy[(j,i)]*2+(np.sqrt(3)/2)),
@@ -359,7 +354,7 @@ class PlotFactory(object):
                                                  alpha=1)
                             ax.add_patch(hex)
                             
-                        # Hexagono Inferior Esquerdo
+                        # Bottom Left Hexagon
                         if not np.isnan(um[j, i, 2]):
                             hex = RegularPolygon((xx[(j, i)]*2 + self.mapsize[0]*2 - 1.5,
                                                   yy[(j,i)]*2+(np.sqrt(3)/2)),
@@ -370,7 +365,7 @@ class PlotFactory(object):
                             ax.add_patch(hex)
                             
                     if i==0 and j==0:
-                        # Hexagono Central
+                        # Central Hexagon
                         hex = RegularPolygon((xx[(j, i)]*2 + self.mapsize[0]*2-1,
                                               yy[(j,i)]*2+(0.8660254*self.mapsize[1]*2)),
                                              numVertices=6,
@@ -379,7 +374,7 @@ class PlotFactory(object):
                                              alpha=1)#, edgecolor='black')
                         ax.add_patch(hex)
                         
-                        # Direita
+                        # Right
                         if not np.isnan(um[j, i, 0]):
                             hex = RegularPolygon((xx[(j, i)]*2 + self.mapsize[0]*2,
                                                   yy[(j,i)]*2+(0.8660254*self.mapsize[1]*2)),
@@ -389,7 +384,7 @@ class PlotFactory(object):
                                                  alpha=1)
                             ax.add_patch(hex)
                                                  
-                        # Hexagono Inferior Direito
+                       # Lower Right Hexagon
                         if not np.isnan(um[j, i, 1]):
                             hex = RegularPolygon((xx[(j, i)]*2+ self.mapsize[0]*2-0.5,
                                                   yy[(j,i)]*2-(np.sqrt(3)/2)+(0.8660254*self.mapsize[1]*2)),
@@ -399,7 +394,7 @@ class PlotFactory(object):
                                                  alpha=1)
                             ax.add_patch(hex)
                             
-                        # Hexagono Inferior Esquerdo
+                        # Bottom Left Hexagon
                         if not np.isnan(um[j, i, 2]):
                             hex = RegularPolygon((xx[(j, i)]*2+ self.mapsize[0]*2-1.5,
                                                   yy[(j,i)]*2-(np.sqrt(3)/2)+(0.8660254*self.mapsize[1]*2)),
@@ -409,7 +404,7 @@ class PlotFactory(object):
                                                  alpha=1)
                             ax.add_patch(hex)
 
-                    #Plotar hits
+                    # Plot hits
                     if hits:
                         try:
                             hex = RegularPolygon((xx[(j,i)]*2,
@@ -459,7 +454,7 @@ class PlotFactory(object):
                             
                     counter+=1
 
-            #Parâmetros de plotagem
+            # Plot Parameters
             
             plt.xlim(0.5, 2*self.mapsize[0]-0.5)
             plt.ylim(0, 2*self.mapsize[1]*0.8660254)
@@ -469,10 +464,10 @@ class PlotFactory(object):
             plt.gca().invert_yaxis()
             plt.close()
 
-            os.makedirs("Plotagens/U_matrix", exist_ok=True)
+            os.makedirs("Plots/U_matrix", exist_ok=True)
 
 
-            filename = "Plotagens/U_matrix/plain_umat.jpg"
+            filename = "Plots/U_matrix/plain_umat.jpg"
             f.savefig(filename, dpi=300, bbox_inches = "tight")
 
             # Read the saved image into a NumPy ndarray
@@ -482,25 +477,25 @@ class PlotFactory(object):
             return umat_plain
  
         else:
-            # Plotagem
+            # Plotting
             f = plt.figure(figsize=figsize, dpi=300)
             
             gs = gridspec.GridSpec(100, 100)
             ax = f.add_subplot(gs[:95, 0:90])
             ax.set_aspect('equal')
 
-            # Normalizar as cores para todos os hexagonos
+            # Normalize colors for all hexagons
             norm = mpl.colors.Normalize(vmin=np.nanmin(um), vmax=np.nanmax(um))
             counter = 0
             
             if watermark_neurons:
-                # Para utilização no plot do número de bmus
+                # For use to plot number of BMUs
                 nnodes = self.mapsize[0] * self.mapsize[1]
                 grid_bmus = np.linspace(1,nnodes, nnodes).reshape(self.mapsize[1], self.mapsize[0])
 
             for j in range(self.mapsize[1]):
                 for i in range(self.mapsize[0]):
-                    # Hexagono Central
+                    # Central Hexagon
                     hex = RegularPolygon((xx[(j, i)]*2,
                                           yy[(j,i)]*2),
                                          numVertices=6,
@@ -510,7 +505,7 @@ class PlotFactory(object):
 
                     ax.add_patch(hex)
 
-                    # Hexagono da Direita
+                     # Right Hexagon
                     if not np.isnan(um[j, i, 0]):
                         hex = RegularPolygon((xx[(j, i)]*2+1,
                                               yy[(j,i)]*2),
@@ -520,7 +515,7 @@ class PlotFactory(object):
                                              alpha=1)
                         ax.add_patch(hex)
 
-                    # Hexagono Superior Direita
+                    # Upper Right Hexagon
                     if not np.isnan(um[j, i, 1]):
                         hex = RegularPolygon((xx[(j, i)]*2+0.5,
                                               yy[(j,i)]*2+(np.sqrt(3)/2)),
@@ -530,7 +525,7 @@ class PlotFactory(object):
                                              alpha=1)
                         ax.add_patch(hex)
 
-                    # Hexagono Superior Esquerdo
+                    # Upper Left Hexagon
                     if not np.isnan(um[j, i, 2]):
                         hex = RegularPolygon((xx[(j, i)]*2-0.5,
                                               yy[(j,i)]*2+(np.sqrt(3)/2)),
@@ -541,7 +536,7 @@ class PlotFactory(object):
                         ax.add_patch(hex)
 
                     if watermark_neurons:
-                        # Hexagono Central
+                        # Central Hexagon
                         hex = RegularPolygon((xx[(j, i)]*2,
                                               yy[(j,i)]*2),
                                               numVertices=6,
@@ -558,7 +553,7 @@ class PlotFactory(object):
                                 verticalalignment='center', 
                                 color='black')
 
-                    #Plotar hits
+                    # Plot hits
                     if hits:
                         if label_plot:
                             ind_var = list(self.component_names).index(label_plot_name)
@@ -616,7 +611,7 @@ class PlotFactory(object):
                         return filtered_dict
                     
                     rep_samples_dic_filter = filter_dictionary(rep_samples_dic, samples_label_names)
-                    with open('Resultados/Amostras_representativas_umatrix.txt', 'w', encoding='utf-8') as file:
+                    with open('Results/Representative_samples_umatrix.txt', 'w', encoding='utf-8') as file:
                         for key, value in rep_samples_dic_filter.items():
                             if isinstance(value, list):
                                 value = ', '.join(value)
@@ -659,31 +654,31 @@ class PlotFactory(object):
                         counter+=1
                     
 
-            #Parâmetros de plotagem
+            # Plot Parameters
             plt.xlim(-1.1, 2*self.mapsize[0]+0.1)
             plt.ylim(-0.5660254-0.6, 2*self.mapsize[1]*0.8660254-2*0.560254+0.6)
             ax.set_axis_off()
             plt.gca().invert_yaxis()
 
-            # Título do mapa
+            # Map title
             plt.title(fill(title,30),
                       horizontalalignment='center',
                       verticalalignment='top',
                       size=title_size,
                       pad=title_pad)
 
-            # Legenda
+            # Legend
             ax2 = f.add_subplot(gs[30:70, 95:98])
             cmap = mpl.cm.turbo
             norm = mpl.colors.Normalize(vmin=np.nanmin(um),
                                         vmax=np.nanmax(um))
 
-            # Barra de cores
+            # Color bar
             cb1 = mpl.colorbar.ColorbarBase(ax2,
                                             cmap=cmap,
                                             norm=norm,
                                             orientation='vertical')
-            # Parâmetros da legenda
+            # Legend Parameters
             cb1.ax.tick_params(labelsize=legend_ticks_size)
 
             
@@ -692,7 +687,7 @@ class PlotFactory(object):
                           labelpad=20)
             cb1.ax.yaxis.label.set_position(label_title_xy)
             """
-            # Mover o colorbar um pouco pra direita
+            # Move the colorbar a little to the right
             pos = cb1.ax.get_position()
             pos.x0 += 0.08 * (pos.x1 - pos.x0)
             pos.x1 += 0.08 * (pos.x1 - pos.x0)
@@ -716,25 +711,25 @@ class PlotFactory(object):
             if file_path:
                 f.savefig(f"{file_path}/{file_name}.jpg",dpi=300, bbox_inches = "tight")
             else:
-                # Criar diretórios se não existirem
-                path = 'Plotagens/U_matrix'
+                # Create directories if they don't exist
+                path = 'Plots/U_matrix'
                 os.makedirs(path, exist_ok=True)
 
-                print("Salvando.")
+                print("Saving.")
                 if hits:
                     if label_plot:
-                        f.savefig(f"Plotagens/U_matrix/{file_name}_with_hits_label.jpg",dpi=300, bbox_inches = "tight") 
+                        f.savefig(f"Plots/U_matrix/{file_name}_with_hits_label.jpg",dpi=300, bbox_inches = "tight") 
                     elif watermark_neurons:
-                        f.savefig(f"Plotagens/U_matrix/{file_name}_with_hits_watermarkbmus.jpg",dpi=300, bbox_inches = "tight") 
+                        f.savefig(f"Plots/U_matrix/{file_name}_with_hits_watermarkneurons.jpg",dpi=300, bbox_inches = "tight") 
                     else:
-                        f.savefig(f"Plotagens/U_matrix/{file_name}_with_hits.jpg",dpi=300, bbox_inches = "tight")
+                        f.savefig(f"Plots/U_matrix/{file_name}_with_hits.jpg",dpi=300, bbox_inches = "tight")
                 else:
                     if label_plot:
-                        f.savefig(f"Plotagens/U_matrix/{file_name}_with_label.jpg",dpi=300, bbox_inches = "tight") 
+                        f.savefig(f"Plots/U_matrix/{file_name}_with_label.jpg",dpi=300, bbox_inches = "tight") 
                     elif watermark_neurons:
-                        f.savefig(f"Plotagens/U_matrix/{file_name}_watermarkbmus.jpg",dpi=300, bbox_inches = "tight") 
+                        f.savefig(f"Plots/U_matrix/{file_name}_watermarkneurons.jpg",dpi=300, bbox_inches = "tight") 
                     else:
-                        f.savefig(f"Plotagens/U_matrix/{file_name}.jpg",dpi=300, bbox_inches = "tight")
+                        f.savefig(f"Plots/U_matrix/{file_name}.jpg",dpi=300, bbox_inches = "tight")
 
 
     def component_plot(self,
@@ -754,50 +749,50 @@ class PlotFactory(object):
                        file_path = False,
                        collage = False):
         """
-        Função para realizar a plotagem de um mapa de variável treinada.
+        Function to perform the plotting of a trained variable map.
 
             Args:
-                component_name: qual o nome da variável que se deseja plotar. É
-                    aceito o nome da váriavel na forma de string ou um número
-                    inteiro relacionado ao índice dessa variável na lista de
-                    variáveis inicial.
+                component_name: the name of the variable you want to plot. It is
+                    accept the variable name in the form of a string or an integer
+                    number related to the index of that variable in the initial
+                    variables list.
 
-                figsize: tamanho da tela de plotagem da variável.
+                figsize: size of the variable's plot screen.
                     Default: (10,10)
 
-                title: título da figura criada. Default: "Matriz U"
+                title: title of the created figure. Default: "U-Matrix"
 
-                title_size: tamanho do título plotado. Default: 40
+                title_size: size of the plotted title. Default: 40
 
-                title_pad: espaçamento entre o título e a parte superior da matriz.
+                title_pad: spacing between the title and the top of the map.
                     Default: 25
 
-                legend_title: título da barra de cores de legenda.
-                    Default: "Distância"
+                legend_title: title of the color bar legend.
+                    Default: "Distance"
 
-                legend_pad: espaçamento entre o título da legenda e a matriz U.
+                legend_pad: spacing between the legend title and the map.
                     Default: 0
 
-                y_legend: espaçamento entre o título da legenda e a parte inferior
-                    da figura. Default: 1.12
+                y_legend: spacing between legend title and bottom
+                    of the figure. Default: 1.12
 
-                legend_title_size = tamanho do título da legenda. Default: 25.
+                legend_title_size = subtitle title size. Default: 24.
 
-                legend_ticks_size = tamanho dos algarismos da barra de cores da
-                    legenda. Default: 20.
+                legend_ticks_size = size of the color bar digits of the
+                    subtitle. Default: 20.
 
-                save: booleano para definir o salvamento da imagem criada.
-                    Esse salvamento será feito no diretório (Plotagens/Matriz_U).
+                save: boolean to define the saving of the created image.
+                    This saving will be done in the directory (Plots/Component_plots).
                     Default: True.
 
-                file_name: o nome que será dado ao arquivo salvo. Caso nenhum nome
-                    seja dado, será utilizado o nome do projeto.
+                file_name: the name that will be given to the saved file. If no name
+                    is given, the name of the project will be used.
 
-                file_path: qual o caminho no sistema em que a imagem deverá ser
-                    salva caso não se opte por utilizar o caminho default.
+                file_path: the path on the system where the image should be
+                    saved in case you do not choose to use the default path.
 
-            Retorna:
-                A imagem com a plotagem da Matriz U de distâncias unificadas.
+            Returns:
+                The image plotting the variable map.
         """
         def check_path(filename):
             # Check if the file already exists in the directory
@@ -820,7 +815,7 @@ class PlotFactory(object):
 
         if isinstance(component_name, int):
             # Pegar uma variavel
-            bmu_var = self.bmu_matrix[:,component_name].reshape(self.mapsize[1], self.mapsize[0])
+            bmu_var = self.neuron_matrix[:,component_name].reshape(self.mapsize[1], self.mapsize[0])
             var_name = self.component_names[component_name]
 
             # Captar unidade da legenda
@@ -829,28 +824,28 @@ class PlotFactory(object):
                 
         elif isinstance(component_name, str):
             index = list(self.component_names).index(component_name)
-            bmu_var = self.bmu_matrix[:, index].reshape(self.mapsize[1], self.mapsize[0])
+            bmu_var = self.neuron_matrix[:, index].reshape(self.mapsize[1], self.mapsize[0])
             var_name = self.component_names[index]
             # Captar unidade da legenda
             if not legend_title:
                 legend_title = self.unit_names[index]
         else:
-            print("Nome errado para componente, aceito somente string com nome da componente ou int com sua posição")
+            print("Wrong name for component, accepts only string with component name or int with its position")
 
-        # Criar coordenadas
+        # Create coordinates
         xx = np.reshape(self.generate_hex_lattice(self.mapsize[0], self.mapsize[1])[:,0], (self.mapsize[1], self.mapsize[0]))
         yy = np.reshape(self.generate_hex_lattice(self.mapsize[0], self.mapsize[1])[:,1], (self.mapsize[1], self.mapsize[0]))
 
-        # Plotagem
+        # Plotting
         f = plt.figure(figsize=figsize,dpi=300)
         gs = gridspec.GridSpec(100, 20)
         ax = f.add_subplot(gs[:95, 0:19])
         ax.set_aspect('equal')
 
-        # Normalizar as cores para todos os hexagonos
+        # Normalize colors for all hexagons
         norm = mpl.colors.Normalize(vmin=np.nanmin(bmu_var), vmax=np.nanmax(bmu_var))
 
-        # Preencher o plot com os hexagonos
+        # Fill the plot with the hexagons
         for j in range(self.mapsize[1]):
             for i in range(self.mapsize[0]):
                 ax.add_patch(RegularPolygon((xx[(j, i)], yy[(j,i)]),
@@ -864,7 +859,7 @@ class PlotFactory(object):
         ax.set_axis_off()
         plt.gca().invert_yaxis()
 
-        # Título do mapa
+        # Map title
         if full_title:
             name = title if title is not None else var_name
         else:
@@ -875,7 +870,7 @@ class PlotFactory(object):
                 name = f"{name[0]} {name[1]}" if len(name)>1 else f"{name[0]}"
         plt.title(fill(f"{name}",20), horizontalalignment='center',  verticalalignment='top', size=title_size, pad=title_pad)
 
-        # Legenda
+        # Legend
         ax2 = f.add_subplot(gs[27:70, 19])
         cmap = mpl.cm.turbo
         norm = mpl.colors.Normalize(vmin=np.nanmin(bmu_var), vmax=np.nanmax(bmu_var))
@@ -885,7 +880,7 @@ class PlotFactory(object):
                                         orientation='vertical')
 
         cb1.ax.tick_params(labelsize=legend_ticks_size)
-        # Colocar titulo da legenda caso tenh nome da variável
+        # Put the caption title if it has a variable name
         cb1.set_label(fill(legend_title,15),
                       size=legend_title_size,
                       labelpad=legend_pad,
@@ -915,9 +910,9 @@ class PlotFactory(object):
                 label_name = var_name[:6]
 
         if collage:
-            path = 'Plotagens/Component_plots/Collage/temp'
+            path = 'Plots/Component_plots/Collage/temp'
             os.makedirs(path, exist_ok=True)
-            path_name = check_path(f"Plotagens/Component_plots/Collage/temp/{label_name}.jpg")
+            path_name = check_path(f"Plots/Component_plots/Collage/temp/{label_name}.jpg")
             f.savefig(path_name,dpi=300, bbox_inches = "tight")
 
         if save:
@@ -925,9 +920,9 @@ class PlotFactory(object):
                 path_name = check_path(f"{file_path}/{label_name}.jpg")
                 f.savefig(path_name,dpi=300, bbox_inches = "tight")
             else:
-                path = 'Plotagens/Component_plots'
+                path = 'Plots/Component_plots'
                 os.makedirs(path, exist_ok=True)
-                path_name = check_path(f"Plotagens/Component_plots/{label_name}.jpg")
+                path_name = check_path(f"Plots/Component_plots/{label_name}.jpg")
                 f.savefig(path_name,dpi=300, bbox_inches = "tight")
 
     def multiple_component_plots(self,
@@ -945,12 +940,12 @@ class PlotFactory(object):
                                 file_path = False, 
                                 collage = False):
         """
-        Função para a plotagem de uma lista ou todas as variáveis treinadas no
-        objeto SOM.
+        Function for plotting a list or all variables trained in the
+        SOM object.
 
         Args:
-            wich: lista de variáveis a ser plotada e salva ou "all" para a
-            plotagem de todas as variáveis.
+            wich: list of variables to be plotted and saved or "all" for
+            plotting all variables.
         """
         if isinstance(wich, str):
             iterator = self.component_names
@@ -960,7 +955,7 @@ class PlotFactory(object):
         # Iteração sobre a função de plotagem individual
         pbar = tqdm(iterator, mininterval=1)
         for name in pbar:
-            pbar.set_description(f"Componente: {name}")
+            pbar.set_description(f"Component: {name}")
             self.component_plot(component_name = name,
                                figsize = figsize,
                                full_title = full_title,
@@ -976,7 +971,7 @@ class PlotFactory(object):
                                collage = collage)
             plt.close()
 
-        print("Finalizado")
+        print("Finished")
 
 
 
@@ -988,55 +983,55 @@ class PlotFactory(object):
                                full_title = False,
                                title_size = 30,
                                title_pad = 25,
-                               legend_title = "Presença",
+                               legend_title = "Presence",
                                legend_title_size = 24,
                                legend_ticks_size = 20,
                                legend_pad = 0,
                                label_title_xy = (0,0.5)):
         """
-        Função para criar uma colagem de mapas de componentes de treinamento
+        Function to create a collage of training component maps
         (Component Plots).
 
         Args:
-            page_size: tamanho da página de colagem dos plots em pixels.
+            page_size: size of the plot collage page in pixels.
                 Default: A4 (2480, 3508)
 
-            grid: o formato do grid de colagem. Default: (4,4)
+            grid: the format of the collage grid. Default: (4,4)
 
-            wich: lista de variáveis a ser colada e salva ou "all" para a
-                plotagem de todas as variáveis.
+            wich: list of variables to be pasted and saved or "all" for
+                plotting all variables.
 
-            title_size: tamanho do título plotado. Default: 40
+            title_size: size of the plotted title. Default: 30
 
-            title_pad: espaçamento entre o título e a parte superior da matriz.
+            title_pad: spacing between the title and the top of the array.
                 Default: 25
 
-            legend_title: título da barra de cores de legenda.
-                Default: "Distância"
+            legend_title: title of the legend color bar.
+                Default: "Presence"
 
-            legend_pad: espaçamento entre o título da legenda e a matriz U.
+            legend_pad: spacing between the legend title and the U matrix.
                 Default: 0
 
-            y_legend: espaçamento entre o título da legenda e a parte inferior
-                da figura. Default: 1.12
+            y_legend: spacing between legend title and bottom
+                of the figure. Default: 1.12
 
-            legend_title_size = tamanho do título da legenda. Default: 25.
+            legend_title_size = subtitle title size. Default: 24.
 
-            legend_ticks_size = tamanho dos algarismos da barra de cores da
-                legenda. Default: 20.
+            legend_ticks_size = size of the color bar digits of the
+                subtitle. Default: 20.
         """
-        # Função de suporte somente para uso dentro dessa função
+        # Support function only for using inside the function
         def resize_image(image, page, grid):
             """
-            Função para redimensionar imagem na folha de acordo com o grid
-            definido.
+           Function to resize the image on the sheet according to the defined
+            grid.
 
             Args:
-                image: a imagem que deve ser dimensionada no grid.
+                image: the image that should be scaled in the grid.
 
-                page: as dimensões da página para a colagem.
+                page: The page dimensions for the collage.
 
-                grid:  o formato do grid de colagem.
+                grid: the format of the collage grid.
             """
             max_hor = page.size[0] / grid[1]
             max_ver = page.size[1] / grid[0]
@@ -1045,19 +1040,19 @@ class PlotFactory(object):
 
             return image
 
-        print("Gerando mapas...")
-        # Listar component plots que ainda não foram feitos
+        print("Generating maps...")
+        # List component plots that haven't been made yet
         if isinstance(wich, str):
             if wich == "all":
                 list_figs = "all"  
                 n_components = len(self.component_names)
             else:
-                print("Os parâmetros aceitos são 'all' ou uma lista de variáveis ou indices de variáveis.")
+                print("The accepted parameters are 'all' or a list of variables or variable indexes.")
         if isinstance(wich, list):
             list_figs = wich
             n_components = len(wich)
 
-        # Criar component plots que ainda não foram gerados anteriorente
+        # Create component plots that have not been previously generated
         self.multiple_component_plots(wich = list_figs,
                                       figsize = figsize,
                                       full_title = full_title,
@@ -1070,21 +1065,21 @@ class PlotFactory(object):
                                       legend_pad = legend_pad,
                                       label_title_xy = label_title_xy,
                                       collage = True)
-        # Adquirir o caminho para todas as imagens
-        images_path = glob.glob('Plotagens/Component_plots/Collage/temp/*.jpg')
+        # Acquire the path for all images
+        images_path = glob.glob('Plots/Component_plots/Collage/temp/*.jpg')
 
-        # Número de páginas necessárias para preencher as componentes nesse grid
+        # Number of pages needed to populate the components in the grid
         n_pages = int(n_components/(grid[0]*grid[1]))+1
 
-        # Número de imagens por página
+        # Number of images per page
         im_pp = grid[0]*grid[1]
 
-        print("Gerando colagem...")
+        print("Generating collage...")
         for i in range(n_pages):
-            # Imagem para fazer a colagem
-            page = Image.new("RGB", page_size, "WHITE")  # Fundo branco
+            # Image to make the collage
+            page = Image.new("RGB", page_size, "WHITE")  # White background
 
-            # Fatiamento dos caminhos de imagem para cada pagina
+            # Slicing image paths for each page
             images_path_page = images_path[i*im_pp:(i+1)*im_pp]
             xx = np.tile(np.arange(grid[1]), grid[0])
             yy = np.repeat(np.arange(grid[0]), grid[1])
@@ -1097,7 +1092,7 @@ class PlotFactory(object):
                 page.paste(img, (x_pos, y_pos))
 
             #Salvar na pasta raiz de plotagens
-            path = 'Plotagens/Component_plots/Collage/pages'
+            path = 'Plots/Component_plots/Collage/pages'
             os.makedirs(path, exist_ok=True)
             
             foot = self.foot
@@ -1108,10 +1103,10 @@ class PlotFactory(object):
             y = page.height - foot.height  # Down position
             page.paste(foot, (x, y))
             
-            page.save(f"Plotagens/Component_plots/Collage/pages/Component_plots_collage_page{i+1}.jpg")
+            page.save(f"Plots/Component_plots/Collage/pages/Component_plots_collage_page{i+1}.jpg")
 
-        print("Finalizado.")
-        print("A pasta 'Plotagens/Component_plots/Collage/temp' pode ser deletada.")
+        print("Finished.")
+        print("The folder 'Plots/Component_plots/Collage/temp' can be deleted.")
     
     def bmu_template(self, 
                      figsize = (10,10),
@@ -1121,46 +1116,45 @@ class PlotFactory(object):
                      file_name = None,
                      file_path = False):
         """
-        Gera o Mapa de BMUS para o mapa Kohonen atual.
-        
+        Generates the BMU map for the current Kohonen map.        
+
         Args:
-                figsize: tamanho da tela de plotagem da variável.
+                figsize: size of the variable's plot screen.
                     Default: (10,10)
 
-                title_size: tamanho do título plotado. Default: 40
+                title_size: size of the plotted title. Default: 24
+                    
+                fontsize: Default: 10
 
-                title_pad: espaçamento entre o título e a parte superior da matriz.
-                    Default: 25
+                save: boolean to define the saving of the created image.
+                    This saving will be done in the directory (Plots/Bmu_template).
+                    Default: False.
 
-                save: booleano para definir o salvamento da imagem criada.
-                    Esse salvamento será feito no diretório (Plotagens/Matriz_U).
-                    Default: True.
+                file_name: the name that will be given to the saved file. If no name
+                    is given, the name of the project will be used.
 
-                file_name: o nome que será dado ao arquivo salvo. Caso nenhum nome
-                    seja dado, será utilizado o nome do projeto.
-
-                file_path: qual o caminho no sistema em que a imagem deverá ser
-                    salva caso não se opte por utilizar o caminho default.
+                file_path: the path on the system where the image should be
+                    saved in case you do not choose to use the default path.
         """
 
-        # Criar coordenadas
+        # Create coordinates
         xx = np.reshape(self.generate_hex_lattice(self.mapsize[0], self.mapsize[1])[:,0], (self.mapsize[1], self.mapsize[0]))
         yy = np.reshape(self.generate_hex_lattice(self.mapsize[0], self.mapsize[1])[:,1], (self.mapsize[1], self.mapsize[0]))
 
-        # Plotagem
+        # Plotting
         f = plt.figure(figsize=figsize, dpi=300)
         gs = gridspec.GridSpec(100, 20)
         ax = f.add_subplot(gs[:, 0:20])
         ax.set_aspect('equal')
 
-        # Normalizar as cores para todos os hexagonos
+        # Normalize colors for all hexagons
         norm = mpl.colors.Normalize(vmin=0, vmax=1)
         
-        # Criar numeração
+        # Create numbering
         nnodes = self.mapsize[0] * self.mapsize[1]
         grid_bmus = np.linspace(1,nnodes, nnodes).reshape(self.mapsize[1], self.mapsize[0])
 
-        # Preencher o plot com os hexagonos
+        # Fill the plot with the hexagons
         for j in range(self.mapsize[1]):
             for i in range(self.mapsize[0]):
                 hex = RegularPolygon((xx[(j,i)], yy[(j,i)]), 
@@ -1178,7 +1172,7 @@ class PlotFactory(object):
                         verticalalignment='center', 
                         color='black')
         
-        plt.title("Template de Neurônios", size=title_size)
+        plt.title("Neurons Template", size=title_size)
         
         # Limites de Plotagem e eixos
         plt.xlim(-0.5, self.mapsize[0]+0.5)
@@ -1188,23 +1182,23 @@ class PlotFactory(object):
         
         if save:
             if file_path:
-                f.savefig(f"{file_path}/{file_name}_bmu_template.jpg",dpi=300, bbox_inches = "tight")
+                f.savefig(f"{file_path}/{file_name}_neurons_template.jpg",dpi=300, bbox_inches = "tight")
             else:
-                path = 'Plotagens/Bmu_template'
+                path = 'Plots/Neurons_template'
                 os.makedirs(path, exist_ok=True)
 
-                f.savefig(f"Plotagens/Bmu_template/{file_name}_bmu_template.jpg",dpi=300, bbox_inches = "tight")
+                f.savefig(f"Plots/Neurons_template/{file_name}_neurons_template.jpg",dpi=300, bbox_inches = "tight")
 
     def generate_rec_lattice(self, n_columns, n_rows):
         """
-        Gera as coordenadas xy dos BMUs para um grid retangular.
+        Generates the xy coordinates of the BMUs for a rectangular grid.
 
         Args:
-            n_rows: Número de linhas do mapa kohonen.
-            n_columns: Número de colunas no mapa kohonen.
+            n_rows: Number of lines in the kohonen map.
+            n_columns: Number of columns in the kohonen map.
 
         Returns:
-            Coordenadas do formato [x,y] para os bmus num grid retangular.
+            Coordinates of the [x,y] format for the BMUs in a rectangular grid.
 
         """
         x_coord = []
@@ -1219,14 +1213,14 @@ class PlotFactory(object):
     @property
     def hits_dictionary(self):
         """
-        Função para criar um dicionário de hits dos vetores de entrada para
-        cada um de seus bmus, proporcional ao tamanho da plotagem.
+        Function to create a hits dictionary from the input vectors for
+        each of its BMUs, proportional to the size of the plot.
         """
-        # Contagem de hits
+        # Hits count
         unique, counts = np.unique(self.bmus, return_counts=True)
 
-        # Normalizar essa contagem de 0.5 a 2.0 (de um hexagono pequeno até um
-        #hexagono que cobre metade dos vizinhos).
+        # Normalize this count from 0.5 to 2.0 (from a small hexagon to a
+        # hexagon that covers half of the neighbors).
         counts = minmax_scale(counts, feature_range = (0.5,2))
 
         return dict(zip(unique, counts))
@@ -1234,13 +1228,13 @@ class PlotFactory(object):
 
     def generate_hex_lattice(self, n_columns, n_rows):
         """
-        Gera as coordenadas xy dos BMUs para um grid hexagonal odd-r.
+        Generates the xy coordinates of the BMUs for an odd-r hex grid.
         Args:
-            n_rows:Número de linhas do mapa kohonen.
-            n_columns:Número de colunas no mapa kohonen.
+            n_rows: Number of lines in the kohonen map.
+            n_columns: Number of columns in the kohonen map.
 
         Returns:
-            Coordenadas do formato [x,y] para os bmus num grid hexagonal.
+            Coordinates in the [x,y] format for the BMUs in a hexagonal grid.
 
         """
         ratio = np.sqrt(3) / 2
@@ -1263,16 +1257,16 @@ class PlotFactory(object):
 
     def plot_torus(self, inner_out_prop = 0.4, red_factor = 4, hits=False):
         """
-        Retorna as coordenadas (x, y, z) para desenhar um toroide.
+        Returns the (x, y, z) corrdinates for drawing a toroid.
+        
+        Args:
+        - rows (int): number of grid rows.
+        - cols (int): number of grid columns.
+        - aspect_ratio (float): proportion between the width and height of the image.
+        - R_scale (float): external radius scale of toroid. Default: 0.4.
 
-        Parâmetros:
-        - rows (int): Número de linhas da grade.
-        - cols (int): Número de colunas da grade.
-        - aspect_ratio (float): Proporção entre a largura e altura da imagem.
-        - R_scale (float): Escala do raio externo do toroide (padrão: 0.4).
-
-        Retorna:
-        Coordenadas (x, y, z) para desenhar o toroide.
+        Returns:
+        (x, y, z) coordinates for drawing a toroid.
         """
 
         mat_im = self.plot_umatrix(figsize = (10,10), 
@@ -1282,14 +1276,14 @@ class PlotFactory(object):
                                        file_path = False, 
                                        resume=True)
             
-        # Resolução Toroide
+        # Toroid Resolution
         y_res = int(mat_im.shape[0]/red_factor)
         x_res = int(mat_im.shape[1]/red_factor)
 
         if mat_im.shape[0] > mat_im.shape[1]:
             mat_im = rotate(mat_im, 90)
 
-        #Reduzir imagem
+        # Reduce image
         mat_res = (resize(mat_im, (y_res, x_res))*256).astype(int)
 
         def torus(rows, cols, aspect_ratio, R_scale=0.4):
