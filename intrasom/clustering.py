@@ -12,7 +12,8 @@ import numpy as np
 from shapely.geometry import Polygon, Point
 from shapely.ops import cascaded_union
 import geopandas as gpd
-import math
+import pkg_resources
+from PIL import Image
 
 
 class ClusterFactory(object):
@@ -26,7 +27,11 @@ class ClusterFactory(object):
         self.bmu_matrix = som_object.bmu_matrix
         self.component_names = som_object.component_names
         self.unit_names = som_object._unit_names
-        self.bmu_dataframe = som_object.bmu_dataframe
+        self.neurons_dataframe = som_object.neurons_dataframe
+        self.sample_names = som_object._sample_names
+        # Load foot image
+        image_file = pkg_resources.resource_filename('intrasom', 'images/foot.jpg')
+        self.foot = Image.open(image_file)
 
     def kmeans(self, k=3, init = "random", n_init=5, max_iter=200):
         """
@@ -64,9 +69,11 @@ class ClusterFactory(object):
             pandas.DataFrame: Um DataFrame contendo os resultados do agrupamento dos dados, incluindo os rótulos de cluster atribuídos. 
         """
 
-        df = self.bmu_dataframe.copy()
+        df = self.neurons_dataframe.copy()
         df[f"{clusters.max()}_clusters"] = clusters.flatten()
         df = df.iloc[self.bmus,:]
+
+        df.set_index(self.sample_names, inplace=True)
 
         if save:
             path = 'Resultados'
@@ -80,12 +87,13 @@ class ClusterFactory(object):
                     figsize = (16,14),
                     title_size = 25,
                     title_pad = 40,
+                    legend_title = False,
                     legend_text_size = 10,
                     save = False,
                     file_name = None,
                     file_path = False,
-                    watermark_bmus = False, 
-                    bmus_text_size = 12,
+                    watermark_neurons = False, 
+                    neurons_fontsize = 12,
                     umatrix = False, 
                     hits=False, 
                     alfa_clust = 0.5, 
@@ -119,9 +127,9 @@ class ClusterFactory(object):
             Nome do arquivo a ser salvo. O padrão é None.
         - file_path: bool, opcional
             Indica se o caminho do arquivo deve ser incluído ao salvar. O padrão é False.
-        - watermark_bmus: bool, opcional
+        - watermark_neurons: bool, opcional
             Indica se os números de BMUs devem ser exibidos como marca d'água no gráfico. O padrão é False.
-        - bmus_text_size: int, opcional
+        - neurons_fontsize: int, opcional
             Tamanho da fonte dos números de BMUs. O padrão é 12.
         - umatrix: bool, opcional
             Indica se a matriz U deve ser plotada no gráfico. O padrão é False.
@@ -156,21 +164,21 @@ class ClusterFactory(object):
             file_name = f"Clusters_{len(np.unique(clusters))}_{self.name}"
 
 
-        f = plt.figure(figsize=figsize)
+        f = plt.figure(figsize=figsize, dpi=300)
         gs = gridspec.GridSpec(100, 100)
         
         max_clust = clusters.max() if len(clusters_highlight) == 0 else len(clusters_highlight)
-        max_clust = max_clust+1 if watermark_bmus else max_clust
+        max_clust = max_clust+1 if watermark_neurons else max_clust
 
         pad_subplots = 3
         if max_clust <=10:
-            ax = f.add_subplot(gs[:, :90-pad_subplots])
+            ax = f.add_subplot(gs[:95, :90-pad_subplots])
         elif max_clust<=20:
-            ax = f.add_subplot(gs[:, :80-pad_subplots])
+            ax = f.add_subplot(gs[:95, :80-pad_subplots])
         elif max_clust<=30:
-            ax = f.add_subplot(gs[:, :70-pad_subplots])
+            ax = f.add_subplot(gs[:95, :70-pad_subplots])
         else:
-            ax = f.add_subplot(gs[:, :60-pad_subplots])
+            ax = f.add_subplot(gs[:95, :60-pad_subplots])
 
         ax.set_aspect('equal')
 
@@ -280,7 +288,7 @@ class ClusterFactory(object):
                     polygon = Polygon(vertices)
                     cluster_vertices_dict[label].append(polygon)
 
-                    if watermark_bmus:
+                    if watermark_neurons:
                         # Para utilização no plot do número de bmus
                         nnodes = self.mapsize[0] * self.mapsize[1]
                         grid_bmus = np.linspace(1,nnodes, nnodes).reshape(self.mapsize[1], self.mapsize[0])
@@ -297,7 +305,7 @@ class ClusterFactory(object):
 
                         ax.text(xx[(j,i)]*2, yy[(j,i)]*2, 
                                 s=f"{int(grid_bmus[j,i])}", 
-                                size = bmus_text_size,
+                                size = neurons_fontsize,
                                 horizontalalignment='center', 
                                 verticalalignment='center', 
                                 color='black', 
@@ -330,7 +338,7 @@ class ClusterFactory(object):
                                         zorder = 1)
                     ax.add_patch(hexagon)
                 
-                    if watermark_bmus:
+                    if watermark_neurons:
                         # Para utilização no plot do número de bmus
                         nnodes = self.mapsize[0] * self.mapsize[1]
                         grid_bmus = np.linspace(1,nnodes, nnodes).reshape(self.mapsize[1], self.mapsize[0])
@@ -347,7 +355,7 @@ class ClusterFactory(object):
 
                         ax.text(xx[(j,i)]*2, yy[(j,i)]*2, 
                                 s=f"{int(grid_bmus[j,i])}", 
-                                size = bmus_text_size,
+                                size = neurons_fontsize,
                                 horizontalalignment='center', 
                                 verticalalignment='center', 
                                 color='black', 
@@ -535,7 +543,7 @@ class ClusterFactory(object):
         x_start = pad+shift/2
         text_pad = hex_height*3
 
-        condition = max_clust-1 if watermark_bmus else max_clust
+        condition = max_clust-1 if watermark_neurons else max_clust
 
         for i, (xfac, yfac) in enumerate(np.ndindex((n_cols, n_rows))):
             if i+1 <= condition:
@@ -564,8 +572,11 @@ class ClusterFactory(object):
                                             edgecolor=color,
                                             linewidth=2)
                 ax2.add_patch(hex_points)
-
-                ax2.annotate(f"Cluster #{cluster}",
+                if len(custom_labels)>0:
+                    cluster_name = custom_labels[cluster-1]
+                else:
+                    cluster_name = f"Cluster #{cluster}"
+                ax2.annotate(cluster_name,
                             xy=(x_center+radius+0.01, y_center),
                             xytext=(0, 0),
                             textcoords="offset points",
@@ -575,7 +586,7 @@ class ClusterFactory(object):
                             ha='left',
                             va='center')
             else:
-                if watermark_bmus:
+                if watermark_neurons:
                     x_center = x_start+(xfac)*shift+xfac*pad+xfac*text_pad
                     y_center = y_start+(yfac)*shift+yfac*pad
 
@@ -611,7 +622,7 @@ class ClusterFactory(object):
                     break
 
         
-        ax2.set_title("Legend", 
+        ax2.set_title(legend_title if legend_title!=False else "Legenda", 
                       fontdict={"fontsize": legend_title_size},
                       loc="center", 
                       pad=5,
@@ -622,6 +633,14 @@ class ClusterFactory(object):
         ax2.set_ylim(1, -0.01)
         
         ax2.set_axis_off()
+
+        #ADD WATERMARK
+        # Add white space subplot below the plot
+        ax3 = f.add_subplot(gs[95:100, 0:20], zorder=-1)
+
+        # Add the watermark image to the white space subplot
+        ax3.imshow(self.foot, aspect='equal', alpha=1)
+        ax3.axis('off')
 
         f.subplots_adjust(wspace=0.1)
 

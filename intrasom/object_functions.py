@@ -106,24 +106,24 @@ class VarianceNormalizer(Normalizer):
     def normalize(self, data):
         me, st = self._mean_and_standard_dev(data)
         st[st == 0] = 1  # prevent: when sd = 0, normalized result = NaN
-        return (data-me)/st
+        return np.round((data-me)/st,10)
 
     def normalize_by(self, raw_data, data, with_labels=False, pred_size=None):
         if with_labels:
-            me, st = self._mean_and_standard_dev(raw_data[:, :(raw_data.shape[1] - pred_size)])
+            me, st = self._mean_and_standard_dev(raw_data[:, : -pred_size])
             st[st == 0] = 1  # prevent: when sd = 0, normalized result = NaN
 
         else:
             me, st = self._mean_and_standard_dev(raw_data)
             st[st == 0] = 1  # prevent: when sd = 0, normalized result = NaN
 
-        return (data - me) / st
+        return np.round((data - me) / st,10)
 
     def denormalize_by(self, data_by, n_vect, with_labels=False, pred_size=None):
         if with_labels:
             me, st = self._mean_and_standard_dev(data_by[:, :(data_by.shape[1] - pred_size)])
         else:
             me, st = self._mean_and_standard_dev(data_by)
-        return n_vect * st + me
+        return np.round(n_vect * st + me,10)
     
 

@@ -32,7 +32,7 @@ class Evaluation(object):
         
         # Checar formatos para adaptação
         if isinstance(data_test, pd.DataFrame):
-            sample_names = data_test.index
+            sample_names = data_test.index.values
             labels = [label for label in data_test.iloc[:,-self.pred_size:].columns]
             data_test = data_test.values
         elif isinstance(data_test, np.ndarray):
@@ -45,7 +45,10 @@ class Evaluation(object):
         # Rótulos verdadeiros
         y_true = data_test[:,-self.pred_size:]
         # Projetar valores
-        y_pred = self.som.project_nan_data(data_test, with_labels=True, save=False).iloc[:,-self.pred_size:].values
+        y_pred = self.som.project_nan_data(data_test, 
+                                           with_labels=True, 
+                                           save=False, 
+                                           sample_names = sample_names).iloc[:,-self.pred_size:].values
         
         
         
