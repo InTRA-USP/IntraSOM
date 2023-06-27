@@ -33,7 +33,8 @@ setup(
         "openpyxl >= 3.1.2",
         "ipywidgets >= 8.0.6",
         "shapely >= 2.0.1",
-        "geopandas >= 0.13.0"
+        "geopandas >= 0.13.0",
+        "nbformat >= 5.9.0"
     ],
     package_data={
         'intrasom': ['images/*.jpg', 'images/*.svg', 'images/*.png']

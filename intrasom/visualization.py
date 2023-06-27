@@ -987,7 +987,8 @@ class PlotFactory(object):
                                legend_title_size = 24,
                                legend_ticks_size = 20,
                                legend_pad = 0,
-                               label_title_xy = (0,0.5)):
+                               label_title_xy = (0,0.5),
+                               file_path=False):
         """
         Function to create a collage of training component maps
         (Component Plots).
@@ -1019,6 +1020,8 @@ class PlotFactory(object):
 
             legend_ticks_size = size of the color bar digits of the
                 subtitle. Default: 20.
+
+            file_path = path to disired directory to save your collage.
         """
         # Support function only for using inside the function
         def resize_image(image, page, grid):
@@ -1091,7 +1094,7 @@ class PlotFactory(object):
                 y_pos = int(yy[j] * page_size[1] / grid[0])
                 page.paste(img, (x_pos, y_pos))
 
-            #Salvar na pasta raiz de plotagens
+            # Save at plots root directory
             path = 'Plots/Component_plots/Collage/pages'
             os.makedirs(path, exist_ok=True)
             
@@ -1103,7 +1106,10 @@ class PlotFactory(object):
             y = page.height - foot.height  # Down position
             page.paste(foot, (x, y))
             
-            page.save(f"Plots/Component_plots/Collage/pages/Component_plots_collage_page{i+1}.jpg")
+            if file_path:
+                page.save(f"{file_path}/Component_plots_collage_page{i+1}.jpg")
+            else:
+                page.save(f"Plots/Component_plots/Collage/pages/Component_plots_collage_page{i+1}.jpg")
 
         print("Finished.")
         print("The folder 'Plots/Component_plots/Collage/temp' can be deleted.")
