@@ -183,8 +183,13 @@ A manuscript detailing this library has been submitted to the "Software Impacts"
 
 -----
 
+## Code Ocean Reproducibility Badge
+[![Open in Code Ocean](https://codeocean.com/codeocean-assets/badge/open-in-code-ocean.svg)](https://codeocean.com/capsule/5539170/tree/v1)
+
+-----
+
 ## Main Authors
-| [<img src="https://avatars.githubusercontent.com/InTRA-USP" width=115 alt="Avatar" style="border-radius: 50%;"><br><sub>InTRA</sub >](https://github.com/InTRA-USP) | [<img src="https://avatars.githubusercontent.com/rodiegeology" width=115 alt="Avatar" style="border-radius: 50%;"><br><sub>Rodrigo Gouvêa</sub>](https://github.com/rodiegeology) [<sub>Lattes</sub>](http://lattes.cnpq.br/9798573275300072)|  [<img src="https://avatars.githubusercontent.com/cleytoncarneiro" width=115 alt="Avatar" style="border-radius: 50%;"><br><sub>Cleyton Carneiro</sub>](https://github.com/cleytoncarneiro) [<sub>Lattes</sub>](http://lattes.cnpq.br/2853220869923540)|  [<img src="https://avatars.githubusercontent.com/rafaelgioria" width=115 alt="Avatar" style="border-radius: 50%;"><br><sub>Rafael Gioria</sub>](https://github.com/rafaelgioria) [<sub>Lattes</sub>](http://lattes.cnpq.br/4272439944346432)|  [<img src="https://avatars.githubusercontent.com/GustavoRodovalho" width=115 alt="Avatar" style="border-radius: 50%;"><br><sub>Gustavo Rodovalho</sub>](https://github.com/GustavoRodovalho) [<sub>Lattes</sub>](http://lattes.cnpq.br/3543013173834786)|
+| [<img src="https://avatars.githubusercontent.com/InTRA-USP" width=115 alt="Avatar" style="border-radius: 50%;"><br><sub>InTRA</sub >](https://github.com/InTRA-USP) | [<img src="https://avatars.githubusercontent.com/rodiegeology" width=115 alt="Avatar" style="border-radius: 50%;"><br><sub>Rodrigo Gouvêa</sub>](https://github.com/rodiegeology) <br>[<sub>Lattes</sub>](http://lattes.cnpq.br/9798573275300072)|  [<img src="https://avatars.githubusercontent.com/cleytoncarneiro" width=115 alt="Avatar" style="border-radius: 50%;"><br><sub>Cleyton Carneiro</sub>](https://github.com/cleytoncarneiro) <br>[<sub>Lattes</sub>](http://lattes.cnpq.br/2853220869923540)|  [<img src="https://avatars.githubusercontent.com/rafaelgioria" width=115 alt="Avatar" style="border-radius: 50%;"><br><sub>Rafael Gioria</sub>](https://github.com/rafaelgioria) <br>[<sub>Lattes</sub>](http://lattes.cnpq.br/4272439944346432)|  [<img src="https://avatars.githubusercontent.com/GustavoRodovalho" width=115 alt="Avatar" style="border-radius: 50%;"><br><sub>Gustavo Rodovalho</sub>](https://github.com/GustavoRodovalho) <br>[<sub>Lattes</sub>](http://lattes.cnpq.br/3543013173834786)|
 | :---: | :---: | :---: | :---: | :---: |
 
 
