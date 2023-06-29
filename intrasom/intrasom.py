@@ -15,6 +15,7 @@ from sklearn.preprocessing import minmax_scale
 import pandas as pd
 import json
 from tqdm.auto import tqdm
+from scipy.ndimage import shift
 
 # Plots
 import matplotlib.pyplot as plt
@@ -434,17 +435,20 @@ class SOM(object):
         # Itera sobre os nós e preenche a matriz de distância para cada nó,
         # através da função grid_dist
         print("Inicializando mapa...")
-        
-        # Acelerar o codigo com processamento paralelo
-        def chunk_distmat_fill(nodes):
-            for i in tqdm(nodes, desc="Matriz\
-                de distâncias", unit=" Neurons"):
-                dist = self.codebook.grid_dist(i)
-                distance_matrix[i:,i] = dist[i:]
-                distance_matrix[i,i:] = dist[i:]
-                del dist
 
+        # Acessar a matriz para o primeiro neurônio
+        initial_matrix = self.codebook.grid_dist(0).reshape(self.mapsize[1], self.mapsize[0])
         
+        counter = 0
+        for i in tqdm(range(self.mapsize[1]), position=0, leave=True, desc="Criando Linhas de Distâncias entre NeurôniosCreating Neuron Distance Rows", unit="linhas"):
+            for j in range(self.mapsize[0]):
+                shifted = shift(initial_matrix, (i,j), mode='grid-wrap')
+                # considerar os deslocamentos para as linhas impares - direção j
+                if i%2!=0:
+                    shifted[0::2] = shift(shifted[0::2], (0,1), mode='grid-wrap')
+                distance_matrix[counter] = shifted.flatten().astype(int)
+                counter+=1
+        """
         for i in tqdm(range(nnodes), desc="Matriz\
             de distâncias", unit=" Neurons"):
             dist = self.codebook.grid_dist(i)
@@ -457,7 +461,7 @@ class SOM(object):
         os.makedirs(path, exist_ok=True)
         # Salvar para que esse processo seja feito somente 1x
         np.save('Resultados/distance_matrix.npy', distance_matrix) 
-
+        """
         return distance_matrix
 
     @property
