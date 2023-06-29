@@ -70,7 +70,7 @@ The structure of this library is based on the structure of the SOMPY library by 
 * Generation of Training Report
 * Projection of new data onto a trained map
 * Clustering module for trained neurons using k-means and visualization of the results
-* Accelerated distance matrix calculation
+* Accelerated distance matrix calculation using matrix shifts
 * Parquet format for input and output of data and training results
 * Label plotting on the U-matrix
 * Implementation of representative sample analysis and visualization on the U-matrix

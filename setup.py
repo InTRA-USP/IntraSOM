@@ -13,7 +13,7 @@ setup(
     version="1.0",
     author="InTRA RDI Center (Universidade de São Paulo)",
     author_email="intra@usp.br",
-    description="IntraSOM Library for Self-Organizing Maps with missing data, hexagonal lattice and toroidal projection",
+    description="IntraSOM: Library for Self-Organizing Maps with missing data, hexagonal lattice and toroidal projection",
     long_description=long_description,
     long_description_content_type="text/markdown",
     keywords="Intrasom SOM Self-Organization Kohonen Non-Supervised U-Matrix",

@@ -15,6 +15,7 @@ from sklearn.preprocessing import minmax_scale
 import pandas as pd
 import json
 from tqdm.auto import tqdm
+from scipy.ndimage import shift
 
 # Plots
 import matplotlib.pyplot as plt
@@ -437,30 +438,32 @@ class SOM(object):
         # through the grid_dist function
         print("Initializing map...")
         
+        # Access matrix for the first neuron
+        initial_matrix = self.codebook.grid_dist(0).reshape(self.mapsize[1], self.mapsize[0])
+        
+        counter = 0
+        for i in tqdm(range(self.mapsize[1]), position=0, leave=True, desc="Creating Neuron Distance Rows", unit="rows"):
+            for j in range(self.mapsize[0]):
+                shifted = shift(initial_matrix, (i,j), mode='grid-wrap')
+                #account for odd-r shifts - j direction
+                if i%2!=0:
+                    shifted[0::2] = shift(shifted[0::2], (0,1), mode='grid-wrap')
+                distance_matrix[counter] = shifted.flatten().astype(int)
+                counter+=1
         """
-        # Speed ​​up code with parallel processing
-        def chunk_distmat_fill(nodes):
-            for i in tqdm(nodes, desc="Matriz\
-                de distâncias", unit=" Neurons"):
-                dist = self.codebook.grid_dist(i)
-                distance_matrix[i:,i] = dist[i:]
-                distance_matrix[i,i:] = dist[i:]
-                del dist
-        """
-
         for i in tqdm(range(nnodes), desc="Matriz\
             de distâncias", unit=" Neurons"):
             dist = self.codebook.grid_dist(i)
             distance_matrix[i:,i] = dist[i:]
             distance_matrix[i,i:] = dist[i:]
             del dist
-        
         # Create directories if they don't exist
         path = 'Results'
         os.makedirs(path, exist_ok=True)
         # Save so that this process is done only 1x
         np.save('Results/distance_matrix.npy', distance_matrix) 
-
+        """
+        
         return distance_matrix
 
     @property
@@ -611,7 +614,7 @@ class SOM(object):
         # Training Parameters
         text_file.write(f"Training Parameters:\n")
         text_file.write(f"\n")
-        text_file.write(f"Brute Training:\n")
+        text_file.write(f"Rough Training:\n")
         text_file.write(f"Size: {self.train_rough_len}\n")
         text_file.write(f"Initial Ratio: {self.train_rough_radiusin}\n")
         text_file.write(f"Final Ratio: {self.train_rough_radiusfin}\n")
