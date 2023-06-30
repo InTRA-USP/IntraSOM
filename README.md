@@ -78,12 +78,45 @@ The structure of this library is based on the structure of the SOMPY library by 
 ## Documentation and Examples
 For documented examples of usage of the functions and features of this library, please refer to the Jupyter Notebook:
 [IntraSOM: Documented Examples](exemplos/exemplos_doc.ipynb)<br>
+**Note**: This notebook is not loaded via GitHub due to its size, but it can be accessed through any IDE that supports Jupyter Notebooks.
+
 <div style="flex: 1; text-align: center; padding: 10px;">
   <h3>Documented Examples in Jupyter Notebook</h3>
   <img src="examples/images/jupyter_ex.jpg" style="max-width: 800px;">
 </div>
 
-**Note**: This notebook is not loaded via GitHub due to its size, but it can be accessed through any IDE that supports Jupyter Notebooks.
+### Open on Google Colab:
+It is possible to access and visualize this notebook through Google Colab:
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://githubtocolab.com/InTRA-USP/IntraSOM/blob/main/examples/examples_doc.ipynb)
+
+To run the notebook inside your Google Drive and connect it to Google Colab, follow these steps:
+
+* Upload the notebook and the data files to your Google Drive.
+* Open Google Colab (https://colab.research.google.com/) in your web browser.
+* Click on "File" in the menu and select "Open Notebook".
+* In the "Notebook" tab, select the "Google Drive" option.
+* Navigate to the location where you uploaded the notebook file in your Google Drive and select it.
+* The notebook will open in Google Colab, and you will have access to your Google Drive files from within the notebook.
+
+Here's an example of code you can use inside the notebook to access files in your Google Drive:
+```
+from google.colab import drive
+
+# Mount Google Drive and Accept Connection
+drive.mount('/content/drive')
+
+# Access files in your Google Drive
+file_path = '/content/drive/MyDrive/path/to/your/file.txt'
+
+# Install Intrasom
+!pip install intrasom
+
+#Ignore versioning warnings
+
+# Continue running the notebook
+# Load dataframe
+data = pd.read_excel(file_path+"data/Animais_missing.xlsx", index_col=0)
+```
 
 -----
 
