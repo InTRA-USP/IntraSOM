@@ -86,7 +86,7 @@ For documented examples of usage of the functions and features of this library, 
 </div>
 
 ### Open on Google Colab:
-It is possible to access and visualize this notebook through Google Colab:
+It is possible to access and visualize this notebook through Google Colab:<br>
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://githubtocolab.com/InTRA-USP/IntraSOM/blob/main/examples/examples_doc.ipynb)
 
 To run the notebook inside your Google Drive and connect it to Google Colab, follow these steps:
