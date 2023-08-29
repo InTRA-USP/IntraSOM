@@ -212,7 +212,25 @@ pip install intrasom
 -----
 
 ## Citation
-A manuscript detailing this library has been submitted to the "Software Impacts" journal. If it is well-received and approved, it will be made available here for citation purposes.
+
+de Gouvêa, R. C. T., Gioria, R. dos S., Marques, G. R., &#38; Carneiro, C. de C. (2023). IntraSOM: A comprehensive Python library for Self-Organizing Maps with hexagonal toroidal maps training and missing data handling. <i>Software Impacts</i>, <i>17</i>, 100570. https://doi.org/10.1016/j.simpa.2023.100570
+
+### BibTeX
+```
+@article{DEGOUVEA2023100570,
+title = {IntraSOM: A comprehensive Python library for Self-Organizing Maps with hexagonal toroidal maps training and missing data handling},
+journal = {Software Impacts},
+volume = {17},
+pages = {100570},
+year = {2023},
+issn = {2665-9638},
+doi = {https://doi.org/10.1016/j.simpa.2023.100570},
+url = {https://www.sciencedirect.com/science/article/pii/S2665963823001070},
+author = {Rodrigo César Teixeira {de Gouvêa} and Rafael dos Santos Gioria and Gustavo Rodovalho Marques and Cleyton de Carvalho Carneiro},
+keywords = {Self-Organizing Maps, Python, Missing data, Imputation, Visualization},
+abstract = {IntraSOM is a new Python library that implements Self-Organizing Maps (SOM). It supports hexagonal lattices, toroidal topology, and provides visualization tools for analyzing complex data sets. The library handles missing data during training and offers efficient clustering algorithms. IntraSOM aims to make SOM more accessible to researchers and practitioners by providing a comprehensive Python implementation. It has an expandable framework and can be integrated with other Python algorithms and libraries. The IntraSOM library is available on GitHub at (https://github.com/InTRA-USP/IntraSOM).}
+}
+```
 
 -----
 
