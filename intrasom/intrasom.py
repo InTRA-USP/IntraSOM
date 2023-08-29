@@ -353,7 +353,7 @@ class SOM(object):
             self._data[self.data_missing["indices"]] = np.nan
         else:
             pass
-        return self._data
+        return self._data.copy()
     
     @property
     def params_json(self):
@@ -1765,104 +1765,43 @@ class SOM(object):
     @property
     def topographic_error(self):
         """
-        Function that is in SOMPY, I disagree with this function, it searches only if the first and second BMU that
-        best represent the input vector are neighbors.
+        Function to calculate the topographic error.
         """
-        bmus2 = self._find_bmu(self.get_data, nth=2)
-               
-        dist_matrix_1 = self._distance_matrix
-        topographic_error = 1-(np.array(
-                [distances[bmu2] for bmu2, distances in zip(bmus2[0].astype(int), dist_matrix_1)]) > 4).mean()
+        bmus1 = self._find_bmu(self.get_data, nth=1)[0].astype(int)
+        bmus2 = self._find_bmu(self.get_data, nth=2)[0].astype(int)
 
-        return topographic_error
-    
-    @property
-    def calculate_topographic_error(self):
-        """
-        Calculation of the Topographic Error, which is a measure of the quality of the
-        preservation of the space structure of the input data in the trained
-        map. It is calculated by finding the smallest and second smallest neurons
-        Euclidean distance of each input vector and evaluating whether the
-        preservation of this neighborhood takes place in the trained output map. If
-        the preservation of the neighborhood occurs so it is said that there was preservation of the
-        topology and the topographic error is low.
-        For each input vector that is not neighborhood preserved it is
-        counted in proportion to the topographical error, so it is an error that varies
-        from 0 (all input vectors maintained the neighborhood) to 1 (none
-        input vector preserved its neighborhood).
-        """
+        rows = self.mapsize[1]
+        cols = self.mapsize[0]
 
-        # Search in chunks to avoid a RAM bottleneck
-        # Start the while loop
-        i0 = 0
-        
-        # Batch size
-        blen = 1000
-        
-        # Indexes
-        indices_before = np.zeros((self.data_raw.shape[0],2))
-        indices_after = np.zeros((self.data_raw.shape[0],2))
-        
-        while i0+1 <= self._dlen:
-            # Start data search
-            low = i0
+        #odd-r offset
+        ii = [[1, 0, -1, -1, -1, 0], [1, 1, 0, -1, 0, 1]]
+        jj = [[0, 1, 1, 0, -1, -1], [0, 1, 1, 0, -1, -1]]
 
-            # End data search
-            high = min(self._dlen, i0+blen)
+        neigs = np.zeros((cols*rows,6))
+        neuron_grid = np.arange(1, rows * cols + 1).reshape(rows, cols)
 
-            # Cut the matrix for this batch
-            ddata = self.data_raw[low:high + 1]
-
-            # Pre-training distance matrix
-            dist_before = nan_euclidean_distances(ddata, ddata)
-
-            # Find vectors closest to input vectors
-            argmin_before = np.argsort(dist_before, axis=0)[1,:]
-
-            # Paired indexes of closest vectors
-            indices_before_batch = np.array([[i,j] for i,j in zip(np.arange(0, len(ddata), 1), argmin_before)])
-
-            # Fill main vector
-            for i, j in zip(np.arange(low, high+1, 1), np.arange(0, blen+1, 1)):
-                indices_before[i] = indices_before_batch[j]            
-
-            # Generate cubic coordinates for the map
-            coordinates = self._generate_oddr_cube_lattice(self.mapsize[0], self.mapsize[1])
-            cols, rows = self.mapsize[0], self.mapsize[1]
-            
-            # Create toroidal neighborhood
-            toroid_neigh = [[0, 0], [cols, 0], [cols, rows], [0, rows], [-cols, rows], [-cols, 0], [-cols, -rows], [0,-rows], [cols, -rows]]
-            toroid_neigh = [self._oddr_to_cube(i[0], i[1]) for i in toroid_neigh]
-            
-            # Capture BMU
-            bmus = self._bmu[0][low:high + 1].astype(int)
-            
-            # Create empty matrix to fill the Manhatan distances inside a hexagonal cubic grid
-            dist_after = np.zeros([len(ddata),len(ddata)])
-            for i in range(len(ddata)):
-                for j in range(len(ddata)):
-                    dist = int(min([self._cube_distance(coordinates[bmus[i]] + neig,coordinates[bmus[j]]) for neig in toroid_neigh]))
-                    dist_after[j][i] = dist
+        for y in range(rows):
+            for x in range(cols):
+                current_index = neuron_grid[y, x] - 1
+                
+                for k, (i, j) in enumerate(zip(ii[y % 2], jj[y % 2])):
+                    new_y = (y + j) % rows  # Wrap-around in the vertical direction
+                    new_x = (x + i) % cols  # Wrap-around in the horizontal direction
                     
-            # Find closest hits to BMU
-            argmin_after = np.argsort(dist_after, axis=0)[1,:]
-            
-            # Paired indexes of these hits
-            indices_after_batch = np.array([[i,j] for i,j in zip(np.arange(0, len(ddata), 1), argmin_after)])
-            
-            # Fill main vector
-            for i, j in zip(np.arange(low, high+1, 1), np.arange(0, blen+1, 1)):
-                indices_after[i] = indices_after_batch[i]
-            
-            # Update loop index
-            i0=i0+blen
-            
-            del ddata
+                    neigs[current_index, k] = neuron_grid[new_y, new_x]
+        neigs = neigs.astype(int)
 
-        # Topographic error: 0 if the neighborhood is maintained and 1 if not
-        topo_error = sum([0 if i==j else 1 for i,j in zip(indices_before, indices_after)])/len(self.data_raw)
+        bmus1_ind = bmus1-1
 
-        return 1-topo_error
+        bmus1_neig = neigs[bmus1_ind]
+        error_counter = 0
+        for i,bmu2 in enumerate(bmus2):
+            if bmu2 not in bmus1_neig[i]:
+                error_counter +=1
+        topo_error = error_counter/bmus1_ind.shape[0]
+
+        return topo_error
+
 
     @property
     def calculate_quantization_error(self):

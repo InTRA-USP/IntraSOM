@@ -284,7 +284,7 @@ class Codebook(object):
 
             Manhattan distance between coordinates.
         """
-        return ((abs(a[0] - b[0]) + abs(a[1] - b[1]) + abs(a[2] - b[2])) / 2)**2
+        return ((abs(a[0] - b[0]) + abs(a[1] - b[1]) + abs(a[2] - b[2]))/4)**2
 
     def oddr_to_cube(self, col, row):
         """
