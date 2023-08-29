@@ -285,7 +285,14 @@ class SOM(object):
         self.missing = missing
         if self.missing == False:
             if np.isnan(self._data).any():
-                sys.exit("Database with missing data, flag in missing parameter")
+                sys.exit("Database with missing data, flag 'missing' as True")
+        elif self.missing == True:
+            if not np.isnan(self._data).any():
+                sys.exit("Database with no missing data, flag 'missing' as False")
+            if mask is not None:
+                sys.exit("The parameter 'mask' is only used in databases with missing values, flag as None or remove this parameter")
+            if save_nan_hist is True:
+                sys.exit("The parameter 'save_nan_hist' is only used in databases with missing values, flag as False or remove this parameter")
         print("Creating neighborhood...")
         self.neighborhood = neighborhood
         self._unit_names = unit_names if unit_names else [f"Unit {var}" for var in self._component_names]
