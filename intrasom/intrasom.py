@@ -286,14 +286,13 @@ class SOM(object):
         if self.missing == False:
             if np.isnan(self._data).any():
                 sys.exit("Database with missing data, flag 'missing' as True")
+        elif self.missing == True:
+            if not np.isnan(self._data).any():
+                sys.exit("Database with no missing data, flag 'missing' as False")
             if mask is not None:
                 sys.exit("The parameter 'mask' is only used in databases with missing values, flag as None or remove this parameter")
             if save_nan_hist is True:
                 sys.exit("The parameter 'save_nan_hist' is only used in databases with missing values, flag as False or remove this parameter")
-        elif self.missing == True:
-            if not np.isnan(self._data).any():
-                sys.exit("Database with no missing data, flag 'missing' as False")
-
         print("Creating neighborhood...")
         self.neighborhood = neighborhood
         self._unit_names = unit_names if unit_names else [f"Unit {var}" for var in self._component_names]
@@ -721,8 +720,7 @@ class SOM(object):
                         data_proj,
                         with_labels=False,
                         sample_names=None,
-                        save = True,
-                        imput = False):
+                        save = True):
         """
         Function to project new data into the trained model, even if these
         data has missing values.
@@ -737,9 +735,7 @@ class SOM(object):
         Returns:
             DataFrame with the BMU representing each input vector.
         """
-        if imput:
-            original = data_proj.values
-
+        
         # Check formats for adaptation
         if isinstance(data_proj, pd.DataFrame):
             sample_names = sample_names if sample_names is not None else data_proj.index.values
@@ -760,8 +756,7 @@ class SOM(object):
                                                       pred_size=self.pred_size)
         else:
             data_proj = data_proj
-            c_shape = data_proj.shape[1]
-            data_proj = self._normalizer.normalize_by(self.data_raw[:,:c_shape],
+            data_proj = self._normalizer.normalize_by(self.data_raw,
                                                       data_proj,
                                                       with_labels=False,
                                                       pred_size=self.pred_size)
@@ -778,37 +773,15 @@ class SOM(object):
         # Create dataframe for projection
         projected_df = bmu_df.iloc[bmus_ind,:]
 
-        if imput:
-            # Transform to arrays
-            projected = projected_df.iloc[:,7:].values
+        projected_df.set_index(np.array(sample_names), inplace=True)
 
-            # Pad original data with nan in case of imputing missing features
-            if projected.shape != original.shape:
-                shape_diff = np.subtract(projected.shape, original.shape)
-                padding = [(0, shape_diff[i]) for i in range(len(shape_diff))]
-                original = np.pad(original, padding, mode='constant', constant_values=np.nan)
-            
-            # Replace nans by trained values
-            nan_mask = np.isnan(original)
-            original[nan_mask] = projected[nan_mask]
-
-            # Recreate dataframe
-            columns = [x[2:] for x in projected_df.iloc[:,7:].columns]
-            index = projected_df.index.values
-            projected_df = pd.DataFrame(original,
-                                        columns=columns, 
-                                        index=index)
-
-        else:
-            projected_df.set_index(np.array(sample_names), inplace=True)
-
-            projected_df = projected_df.astype({"BMU": int,
-                                                "Ret_x": int,
-                                                "Ret_y": int,
-                                                "Cub_x": int,
-                                                "Cub_y": int,
-                                                "Cub_z": int
-                                            })
+        projected_df = projected_df.astype({"BMU": int,
+                                            "Ret_x": int,
+                                            "Ret_y": int,
+                                            "Cub_x": int,
+                                            "Cub_y": int,
+                                            "Cub_z": int
+                                           })
         # Save
         if save:
             # Create results folder
