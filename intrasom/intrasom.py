@@ -376,6 +376,8 @@ class SOM(object):
                 return obj
             elif isinstance(obj, list):
                 return [fix_serialize(item) for item in obj]
+            elif isinstance(obj, tuple):
+                return [fix_serialize(item) for item in obj]
             elif isinstance(obj, np.int64):
                 return int(obj)
             else:
