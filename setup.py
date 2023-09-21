@@ -10,7 +10,7 @@ long_description = (this_directory / "README.md").read_text(encoding="utf-8")
 
 setup(
     name="IntraSOM",
-    version="1.0",
+    version="1.0.1",
     author="InTRA RDI Center (Universidade de São Paulo)",
     author_email="intra@usp.br",
     description="IntraSOM: Library for Self-Organizing Maps with missing data, hexagonal lattice and toroidal projection",
