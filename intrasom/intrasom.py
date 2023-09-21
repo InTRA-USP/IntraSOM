@@ -47,7 +47,8 @@ class SOMFactory(object):
               sample_names=None,
               missing=False,
               save_nan_hist=False,
-              pred_size=0):
+              pred_size=0,
+              dist_factor = 2):
         """
 
          onstructs an object for SOM training, with the data parameters,
@@ -121,6 +122,11 @@ class SOMFactory(object):
                 DataFrame. Please indicate here the number of labeled columns so 
                 that the project_nan_data() projection function can be used with 
                 unlabeled data.
+            
+            dist_factor: the factor by wich the cube distance will be elevated to
+                calculate the map distances, the bigger the value, the faster the
+                map will converge. Attention should be addressed in fast convergions
+                and lack o convergence dute to small dist_factor. Default:2.
 
         Returns:
             SOM object with all its inherited methods and attributes.
@@ -152,7 +158,8 @@ class SOMFactory(object):
                    sample_names = sample_names,
                    missing = missing,
                    save_nan_hist=save_nan_hist,
-                   pred_size = pred_size)
+                   pred_size = pred_size,
+                   dist_factor = dist_factor)
 
     @staticmethod
     def load_som(data,
@@ -199,6 +206,7 @@ class SOMFactory(object):
         bmus_ind = params["bmus"]
         bmus_dist = params["bmus_dist"]
         bmus = np.array([bmus_ind, bmus_dist])
+        dist_factor = params["dist_factor"]
         load_param=True
 
         return SOM(data = data,
@@ -220,7 +228,8 @@ class SOMFactory(object):
                    pred_size = pred_size,
                    load_param = load_param,
                    trained_neurons = trained_neurons, 
-                   bmus = bmus)
+                   bmus = bmus,
+                   dist_factor = dist_factor)
 
 class SOM(object):
 
@@ -245,7 +254,8 @@ class SOM(object):
                  pred_size=0,
                  load_param=False,
                  trained_neurons=None, 
-                 bmus = None):
+                 bmus = None,
+                 dist_factor = 2):
 
         # Mask for missing values
         self.mask = mask
@@ -282,6 +292,7 @@ class SOM(object):
         self._dlen = data.shape[0]
         self.pred_size = pred_size
         self.name = name
+        self.dist_factor = dist_factor
         self.missing = missing
         if self.missing == False:
             if np.isnan(self._data).any():
@@ -328,7 +339,7 @@ class SOM(object):
             # Alocando os bmus
             self._bmu = bmus
             print("Creating codebook...")
-            self.codebook = Codebook(self.mapsize, self.lattice, self.mapshape)
+            self.codebook = Codebook(self.mapsize, self.lattice, self.mapshape, self.dist_factor)
             self.codebook.matrix = self._normalizer.normalize_by(self.data_raw, trained_neurons.iloc[:,7:].values)
             
             try:
@@ -342,7 +353,7 @@ class SOM(object):
             self.data_missing = {"indices":tuple(zip(*np.argwhere(np.isnan(self.data_raw)))), 
                                  "nan_values":None}
             self._bmu = np.zeros((2,self._dlen))
-            self.codebook = Codebook(self.mapsize, self.lattice, self.mapshape)
+            self.codebook = Codebook(self.mapsize, self.lattice, self.mapshape, self.dist_factor)
             try:
                 self._distance_matrix = np.load("Results/distance_matrix.npy")
                 if self.mapsize[0]*self.mapsize[1] != self._distance_matrix.shape[0]:
@@ -402,6 +413,7 @@ class SOM(object):
         dic["sample_names"] = list(self._sample_names)
         dic["missing"] = self.missing
         dic["pred_size"] = int(self.pred_size)
+        dic["dist_factor"] = self.dist_factor
         dic["bmus"] = self._bmu[0].astype(int).tolist()
         if self.missing == True:
             dic["bmus_dist"] = self._bmu[1].tolist()
@@ -436,8 +448,6 @@ class SOM(object):
         steps and returns them in the form of an array of internal distances
         from the grid.
         """
-        blen = 50
-        
         # Capture the number of training neurons
         nnodes = self.codebook.nnodes
 
@@ -447,32 +457,27 @@ class SOM(object):
         # Iterates over the nodes and fills the distance matrix for each node,
         # through the grid_dist function
         print("Initializing map...")
-        
-        # Access matrix for the first neuron
-        initial_matrix = self.codebook.grid_dist(0).reshape(self.mapsize[1], self.mapsize[0])
-        
-        counter = 0
-        for i in tqdm(range(self.mapsize[1]), position=0, leave=True, desc="Creating Neuron Distance Rows", unit="rows"):
-            for j in range(self.mapsize[0]):
-                shifted = shift(initial_matrix, (i,j), mode='grid-wrap')
-                #account for odd-r shifts - j direction
-                if i%2!=0:
-                    shifted[0::2] = shift(shifted[0::2], (0,1), mode='grid-wrap')
-                distance_matrix[counter] = shifted.flatten().astype(int)
-                counter+=1
-        """
-        for i in tqdm(range(nnodes), desc="Matriz\
-            de distâncias", unit=" Neurons"):
-            dist = self.codebook.grid_dist(i)
-            distance_matrix[i:,i] = dist[i:]
-            distance_matrix[i,i:] = dist[i:]
-            del dist
-        # Create directories if they don't exist
-        path = 'Results'
-        os.makedirs(path, exist_ok=True)
-        # Save so that this process is done only 1x
-        np.save('Results/distance_matrix.npy', distance_matrix) 
-        """
+        if self.mapshape == "toroid":
+            # Access matrix for the first neuron
+            initial_matrix = self.codebook.grid_dist(0).reshape(self.mapsize[1], self.mapsize[0])
+            
+            counter = 0
+            for i in tqdm(range(self.mapsize[1]), position=0, leave=True, desc="Creating Neuron Distance Rows", unit="rows"):
+                for j in range(self.mapsize[0]):
+                    shifted = shift(initial_matrix, (i,j), mode='grid-wrap')
+                    #account for odd-r shifts - j direction
+                    if i%2!=0:
+                        shifted[0::2] = shift(shifted[0::2], (0,1), mode='grid-wrap')
+                    distance_matrix[counter] = shifted.flatten().astype(int)
+                    counter+=1
+        elif self.mapshape == "planar":
+            for i in tqdm(range(nnodes), desc="Creating Neuron Distance Rows", unit=" Neurons"):
+                dist = self.codebook.grid_dist(i)
+                distance_matrix[i,:] = dist
+                del dist 
+        else:
+            sys.exit("Mapshape only accepts 'toroid' or 'planar' as parameter")
+            
         
         return distance_matrix
 

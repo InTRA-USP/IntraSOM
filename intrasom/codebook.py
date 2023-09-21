@@ -6,9 +6,10 @@ class Codebook(object):
     trained in its competitive, collaborative and adaptive synaptic processes.
     """
 
-    def __init__(self, mapsize, lattice, mapshape):
+    def __init__(self, mapsize, lattice, mapshape, dist_factor):
         self.lattice = lattice
         self.mapshape = mapshape
+        self.dist_factor = dist_factor
 
         if 2 == len(mapsize):
             _size = [1, np.max(mapsize)] if 1 == np.min(mapsize) else mapsize
@@ -26,6 +27,7 @@ class Codebook(object):
         self.nnodes = self.mapsize[0] * self.mapsize[1]
         self.matrix = np.asarray(self.mapsize)
         self.initialized = False
+
 
     @property
     def get_matrix(self):
@@ -174,10 +176,10 @@ class Codebook(object):
         coordinates = self.generate_oddr_cube_lattice(cols, rows)
 
         # Find the manhatan distances for a hexagonal grid via their xy coordinates
-        dist = np.array([self.cube_distance(coordinates[node_ind], coordinates[i])**2\
+        dist = np.array([self.cube_distance(coordinates[node_ind], coordinates[i], dist_factor=self.dist_factor)\
          for i in range(len(coordinates))])
 
-        return dist
+        return dist.astype(int)
 
     def _hexa_dist_tor(self, node_ind):
         """
@@ -210,7 +212,7 @@ class Codebook(object):
         for i in range(cols*rows):
             if i >= node_ind:
                 for j, neig in enumerate(toroid_neigh):
-                    dist[i,j] = self.cube_distance(coordinates[i]+neig, coordinates[node_ind])
+                    dist[i,j] = self.cube_distance(coordinates[i]+neig, coordinates[node_ind], dist_factor=self.dist_factor)
 
 
         return np.min(dist, axis=1).astype(int)
@@ -273,7 +275,7 @@ class Codebook(object):
         coordinates = np.column_stack([x_coord, y_coord, z_coord])
         return coordinates
 
-    def cube_distance(self, a, b):
+    def cube_distance(self, a, b, dist_factor = 2):
         """
         Calculates the Euclidean distance between two cubic coordinates
         Args:
@@ -284,7 +286,7 @@ class Codebook(object):
 
             Manhattan distance between coordinates.
         """
-        return ((abs(a[0] - b[0]) + abs(a[1] - b[1]) + abs(a[2] - b[2]))/4)**2
+        return ((abs(a[0] - b[0]) + abs(a[1] - b[1]) + abs(a[2] - b[2]))/2)**dist_factor
 
     def oddr_to_cube(self, col, row):
         """
