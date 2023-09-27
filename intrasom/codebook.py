@@ -1,4 +1,5 @@
 import numpy as np
+from sklearn.decomposition import PCA
 
 class Codebook(object):
     """
@@ -64,7 +65,68 @@ class Codebook(object):
         self.matrix = mn + (mx - mn) *\
             (np.random.rand(self.nnodes, data.shape[1]))
         self.initialized = True
+
+    def pca_linear_initialization(self, data):
+        """
+        Initialization of the map by using just the first two eigenvalues and
+        eigenvectors. The initialization is done in the following steps:
+        1. Transformation of input data and creation of a template matrix
+        2. Creation of a matrix with scaling factors for each principal component (PC)
+        3. Obtaining and normalization of the eigenvector(s)
+        4. Linear combination for each node of the template matrix with the PC
+
+        Args:
+            data: data to use for the initialization
+
+        Returns:
+            Initialized matrix with same dimension as input data.
+        """
+        cols = self.mapsize[1]
+        coord = None
+        pca_components = None
+
+        me = np.mean(data, 0)
+        data = (data - me)
+        tmp_matrix = np.tile(me, (self.nnodes, 1))
+
+        if np.min(self.mapsize) > 1:
+            coord = np.zeros((self.nnodes, 2))
+            pca_components = 2
+
+            for i in range(0, self.nnodes):
+                coord[i, 0] = int(i / cols)  # x
+                coord[i, 1] = int(i % cols)  # y
+
+        elif np.min(self.mapsize) == 1:
+            coord = np.zeros((self.nnodes, 1))
+            pca_components = 1
+
+            for i in range(0, self.nnodes):
+                coord[i, 0] = int(i % cols)  # y
+
+        mx = np.max(coord, axis=0)
+        mn = np.min(coord, axis=0)
+        coord = (coord - mn)/(mx-mn)
+        coord = (coord - .5)*2
+
+        pca = PCA(n_components=pca_components, svd_solver='randomized')
+
+        pca.fit(data)
+        eigvec = pca.components_
+        eigval = pca.explained_variance_
+        norms = np.sqrt(np.einsum('ij,ij->i', eigvec, eigvec))
+        eigvec = ((eigvec.T/norms)*eigval).T
+
+        for j in range(self.nnodes):
+            for i in range(eigvec.shape[0]):
+                tmp_matrix[j, :] = tmp_matrix[j, :] + coord[j, i]*eigvec[i, :]
+
+        self.matrix = np.around(tmp_matrix, decimals=6)
+        self.initialized = True
     
+    def pretrain(self):
+        self.initialized = True
+
     def pretrain(self):
         self.initialized = True
 
