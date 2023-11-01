@@ -558,7 +558,8 @@ class SOM(object):
         results_df = bmu_df.iloc[bmus,:]
 
         # Enter the quantization error for each vector
-        results_df.insert(1, "q-error", self.calculate_quantization_error_expanded)
+        QE = self.calculate_quantization_error_expanded if self.missing == False else np.around(np.sqrt(self._bmu[1]), decimals=4)
+        results_df.insert(1, "q-error", QE)
 
         # Change index with the sample names
         results_df.set_index(self._sample_names, inplace=True)
@@ -647,7 +648,8 @@ class SOM(object):
         # Training Quality Parameters
         text_file.write(f"Training Evaluation:\n")
         text_file.write(f"\n")
-        text_file.write(f"Quantization Error: {round(self.calculate_quantization_error, 4)}\n")
+        QE = round(self.calculate_quantization_error, 4) if self.missing == False else round(np.mean(np.sqrt(self._bmu[1])),4)
+        text_file.write(f"Quantization Error: {QE}\n")
         text_file.write(f"Topographic Error: {round(self.topographic_error, 4)}\n")
         text_file.close()
         print("Training Report Created")
