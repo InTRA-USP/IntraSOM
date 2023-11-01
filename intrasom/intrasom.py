@@ -1758,7 +1758,12 @@ class SOM(object):
                 # Clipping on the input matrix in these batch samples
                 ddata = input_matrix[low:high + 1]
 
-                if self.actual_train == "Rough" or self.previous_epoch == False:
+                try:
+                    boolean = self.actual_tain == "Rough"
+                except:
+                    boolean = False
+
+                if project == True or boolean == True or self.previous_epoch == False:
                     type_search = "nan_euclid"
                 else:
                     type_search = "Fine"
