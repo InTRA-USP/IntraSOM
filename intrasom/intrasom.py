@@ -430,6 +430,8 @@ class SOM(object):
         json_params = json.dumps(dic)
 
         # Save the result into the specified directory
+        path = 'Results'
+        os.makedirs(path, exist_ok=True)
         f = open(f"Results/params_{self.name}.json","w")
         f.write(json_params)
         f.close()
