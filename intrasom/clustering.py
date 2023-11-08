@@ -14,6 +14,11 @@ from shapely.ops import cascaded_union
 import geopandas as gpd
 import pkg_resources
 from PIL import Image
+from tqdm.notebook import tqdm
+from sklearn.metrics import davies_bouldin_score as db
+import pandas as pd
+import plotly.graph_objects as go
+from collections import Counter
 
 
 class ClusterFactory(object):
@@ -56,6 +61,161 @@ class ClusterFactory(object):
         kmeans = KMeans(n_clusters=k, init=init, n_init=n_init, max_iter=max_iter).fit(self.codebook).labels_+1
 
         return kmeans.reshape(self.mapsize[1], self.mapsize[0])
+    
+    def Davies_Bouldin_analysis(self, 
+                                max_clust = 30, 
+                                n_iter=100, 
+                                min_type="ensamble", 
+                                plot=True, 
+                                save=False,
+                                verbose=True
+                                ):
+        """
+        Docstring
+        """
+        def clust_counter(clusts):
+            count = np.array(Counter(clusts).most_common())
+            count[:,1] = count[:,1]/count[:,1].sum()*100
+            return count
+        
+        # Recovery neuron matrix for analysis
+        X = self.neuron_matrix
+
+        # Normalize neuron matrix
+        mean = np.mean(X, axis=0)
+        std = np.std(X, axis=0)
+        X = (X-mean)/std
+
+        # Davies Bouldin Analysis
+        n_clusters = np.arange(2, max_clust+1,1)
+        db_summary = {}
+
+        for it in tqdm(range(n_iter)):
+            db_results = np.zeros(len(n_clusters))
+            db_summary[f"Iter{it+1}"] = db_results
+            for n_clust in n_clusters:
+                kmeans = KMeans(n_clusters=n_clust, 
+                                init="random",
+                                n_init = 5,
+                                max_iter=200
+                                ).fit(X)
+                db_results[n_clust-2] = db(X, kmeans.labels_)
+        
+        df = pd.DataFrame.from_dict(db_summary, orient='index', columns=n_clusters)
+        if save:
+            path = 'Results'
+            os.makedirs(path, exist_ok=True)
+            df.to_excel(f"Results/{self.name}_dbindex_iterations.xlsx")
+        
+        # Overwrite X to save space
+        X = df.values
+
+        # Minima calculation
+        f_mins = []
+        s_mins = []
+        t_mins = []
+        m_mins = []
+        max_mins = []
+        for it in X:
+            x = np.r_[True, it[1:] < it[:-1]] & np.r_[it[:-1] < it[1:], True]
+            f_min, s_min, t_min, m_min, max_min = it[x][np.argsort(it[x])[0]], it[x][np.argsort(it[x])[1]],it[x][np.argsort(it[x])[2]], it[x][np.argsort(it[x])[:][int(((len(it[x])-1)/2))]], it[x][np.argsort(it[x])[:][-1]]
+            f_mins.append(f_min)
+            s_mins.append(s_min)
+            t_mins.append(t_min)
+            m_mins.append(m_min)
+            max_mins.append(max_min)
+
+        f_clust_min = []
+        s_clust_min = []
+        t_clust_min = []
+        m_clust_min = []
+        max_clust_min = []
+        for i in range(len(f_mins)):
+            f_clust_min.append(df.iloc[i][df.iloc[i]==f_mins[i]].index[0])
+            s_clust_min.append(df.iloc[i][df.iloc[i]==s_mins[i]].index[0])
+            t_clust_min.append(df.iloc[i][df.iloc[i]==t_mins[i]].index[0])
+            m_clust_min.append(df.iloc[i][df.iloc[i]==m_mins[i]].index[0])
+            max_clust_min.append(df.iloc[i][df.iloc[i]==max_mins[i]].index[0])
+        sum_clust_min = f_clust_min + s_clust_min
+
+        if plot:
+            x = df.columns.values.astype(int)
+            y = df.mean().values
+            y_upper = df.quantile(0.75).values
+            y_lower = df.quantile(0.25).values
+            error = (y_upper-y_lower)/2
+
+            fig = go.Figure()
+            for i in range(df.iloc[:,:19].shape[0]):
+                fig.add_trace(go.Scatter(
+                    x=df.columns.values,
+                    y=df.iloc[i],
+                    name=f"Iter {i+1}",
+                    showlegend=False,
+                    line=dict(color="silver")
+                ))
+
+            # Confidence Interval
+            fig.add_trace(go.Scatter(
+                x=x,
+                y=y,
+                line=dict(color='rgb(0,0,0)'),
+                mode='lines',
+                name="Trendline", 
+                error_y=dict(
+                        type='data', # value of error bar given in data coordinates
+                        array=error,
+                        visible=True)
+                ))
+                
+            fig.update_layout(
+                template= "simple_white",
+                title= "DBI Comparison: First and Second Global Minima",
+                xaxis_title="Cluster Number",
+                yaxis_title="Davies-Bouldin Index",
+                width=1500,
+                height=600,
+                font=dict(
+                    size=20
+                ),
+                legend=dict(
+                    orientation="h", y=-0.2)
+            )
+
+            fig.add_trace(go.Scatter(x=f_clust_min, y=f_mins, mode='markers', name='Global Minimum',
+                                        marker_symbol ='circle-open', marker=dict(size=10, color = '#0000FF', line=dict(width=3))))
+            fig.add_trace(go.Scatter(x=s_clust_min, y=s_mins, mode='markers', name='Second Global Minimum',
+                                        marker_symbol ='circle-open', marker=dict(size=10, color = '#DC3912', line=dict(width=3))))
+            #fig.add_trace(go.Scatter(x=t_clust_min, y=t_mins, mode='markers', name='Third to Global Minimum',
+            #                            marker_symbol ='circle-open', marker=dict(size=10, color = '#ffff00', line=dict(width=3))))
+            #fig.add_trace(go.Scatter(x=m_clust_min, y=m_mins, mode='markers', name='Average Local Minimum',
+            #                            marker_symbol ='circle-open', marker=dict(size=10, color = '#ffff00', line=dict(width=3))))
+            fig.show()
+
+        # Cluster number counting
+        fcounter = clust_counter(f_clust_min)
+        scounter = clust_counter(s_clust_min)
+        sumcounter = clust_counter(sum_clust_min)
+
+        if verbose:
+            print("Davies-Bouldin results:")
+            print("")
+            print("First Minimum:")
+            print(f"Cluster Number: {fcounter[0][0]}. Percentage: {fcounter[0][1]}%.")
+            print(f"Cluster Number: {fcounter[1][0]}. Percentage: {fcounter[1][1]}%.")
+            print("")
+            print("Second Minimum:")
+            print(f"Cluster Number: {scounter[0][0]}. Percentage: {scounter[0][1]}%.")
+            print(f"Cluster Number: {scounter[1][0]}. Percentage: {scounter[1][1]}%.")
+            print("")
+            print("Ensamble Minimum:")
+            print(f"Cluster Number: {sumcounter[0][0]}. Percentage: {sumcounter[0][1]}%.")
+            print(f"Cluster Number: {sumcounter[1][0]}. Percentage: {sumcounter[1][1]}%.")
+        else:
+            print(f"Davies-Bouldin results:")
+            print(f"First Minimum: {fcounter[0][0]}")
+            print(f"Second Minimum: {scounter[0][0]}")
+            print(f"Ensamble Minimum: {sumcounter[0][0]}")
     
     def results_cluster(self, clusters, save=True, savetype="parquet"):
         """
