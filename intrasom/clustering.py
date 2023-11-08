@@ -57,7 +57,7 @@ class ClusterFactory(object):
 
         return kmeans.reshape(self.mapsize[1], self.mapsize[0])
     
-    def results_cluster(self, clusters, save=True):
+    def results_cluster(self, clusters, save=True, savetype="parquet"):
         """
         Returns a DataFrame containing the results of grouping the data, with the addition of the assigned cluster labels.
 
@@ -78,7 +78,10 @@ class ClusterFactory(object):
         if save:
             path = 'Results'
             os.makedirs(path, exist_ok=True)
-            df.to_excel(f"Results/{self.name}_results_{clusters.max()}_clusters.xlsx")
+            if savetype == "xlsx":
+                df.to_excel(f"Results/{self.name}_results_{clusters.max()}_clusters.xlsx")
+            elif savetype == "parquet":
+                df.to_parquet(f"Results/{self.name}_results_{clusters.max()}_clusters.parquet")
 
         return df
             
