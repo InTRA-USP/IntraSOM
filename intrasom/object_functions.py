@@ -94,8 +94,8 @@ class Normalizer(object):
 class VarianceNormalizer(Normalizer):
 
     """
-    Normalização pela variância. Os dados serão normalizados pela subtração da
-    média e divisão pelo desvio padrão daquela variável.
+    Normalization by variance. The data will be normalized by subtracting the mean and dividing by 
+    the standard deviation of that variable.
     """
 
     name = 'var'
@@ -126,4 +126,19 @@ class VarianceNormalizer(Normalizer):
             me, st = self._mean_and_standard_dev(data_by)
         return np.round(n_vect * st + me,10)
     
+class NoneNormalizer(Normalizer):
+    """
+    Class for handling cases when normalization should not be applied.
+    """
+
+    name = "None"
+
+    def normalize(self, data):
+        return data
+
+    def normalize_by(self, raw_data, data):
+        return data
+
+    def denormalize_by(self, raw_data, data):
+        return data
 

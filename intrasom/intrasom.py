@@ -2102,8 +2102,10 @@ class SOM(object):
                     if isinstance(value, list):
                         value = ', '.join(value)
                     file.write(f'BMU {key+1}: {value}\n')
+        
+        sorted_dict = {k+1: rep_samples_dic[k] for k in sorted(rep_samples_dic)}
 
-        return rep_samples_dic
+        return sorted_dict
 
 
     def _expected_mapsize(self, data):
