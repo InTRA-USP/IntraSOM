@@ -133,10 +133,8 @@ class SOMFactory(object):
 
         """
         # Apply normalization if it is defined
-        if normalization:
-            normalizer = NormalizerFactory.build(normalization)
-        else:
-            normalizer = None
+        normalization = "None" if normalization is None else normalization
+        normalizer = NormalizerFactory.build(normalization)
 
         # Build the neighborhood calculation object according to the function of
         # specified neighborhood
@@ -185,10 +183,7 @@ class SOMFactory(object):
         """
         print("Loading data...")
         normalization = params["normalization"]
-        if normalization:
-            normalizer = NormalizerFactory.build(normalization)
-        else:
-            normalizer = None
+        normalizer = NormalizerFactory.build(normalization)
         neigh_calc = NeighborhoodFactory.build(params["neighborhood"])
         mapsize = params["mapsize"]
         mask = params["mask"]
@@ -287,7 +282,7 @@ class SOM(object):
         # Populate non-type dependent attributes
         print("Normalizing data...")
         self._normalizer = normalizer
-        self._normalization = normalization
+        self._normalization = "None" if normalization is None else normalization
         self._dim = data.shape[1]
         self._dlen = data.shape[0]
         self.pred_size = pred_size
@@ -558,7 +553,7 @@ class SOM(object):
         results_df = bmu_df.iloc[bmus,:]
 
         # Enter the quantization error for each vector
-        QE = self.calculate_quantization_error_expanded if self.missing == False else np.around(np.sqrt(self._bmu[1]), decimals=4)
+        QE = self.calculate_quantization_error_expanded if self.missing == True else np.around(np.sqrt(self._bmu[1]), decimals=4)
         results_df.insert(1, "q-error", QE)
 
         # Change index with the sample names
@@ -648,7 +643,7 @@ class SOM(object):
         # Training Quality Parameters
         text_file.write(f"Training Evaluation:\n")
         text_file.write(f"\n")
-        QE = round(self.calculate_quantization_error, 4) if self.missing == False else round(np.mean(np.sqrt(self._bmu[1])),4)
+        QE = round(self.calculate_quantization_error, 4) if self.missing == True else round(np.mean(np.sqrt(self._bmu[1])),4)
         text_file.write(f"Quantization Error: {QE}\n")
         text_file.write(f"Topographic Error: {round(self.topographic_error, 4)}\n")
         text_file.close()
@@ -1745,7 +1740,7 @@ class SOM(object):
 
         # While loop initializer
         i0 = 0
-        
+
         if missing:
             while i0 + 1 <= dlen:
                 # Start searching the data (rows of the input matrix)
@@ -1757,13 +1752,16 @@ class SOM(object):
 
                 # Clipping on the input matrix in these batch samples
                 ddata = input_matrix[low:high + 1]
-
                 try:
-                    boolean = self.actual_tain == "Rough"
+                    boolean = self.actual_train == "Rough"
                 except:
                     boolean = False
 
-                if project == True or boolean == True or self.previous_epoch == False:
+                if project == True:
+                    type_search = "nan_euclid"
+                elif boolean == True:
+                    type_search = "nan_euclid"
+                elif self.previous_epoch==False:
                     type_search = "nan_euclid"
                 else:
                     type_search = "Fine"
@@ -2102,8 +2100,10 @@ class SOM(object):
                     if isinstance(value, list):
                         value = ', '.join(value)
                     file.write(f'BMU {key+1}: {value}\n')
+        
+        sorted_dict = {k+1: rep_samples_dic[k] for k in sorted(rep_samples_dic)}
 
-        return rep_samples_dic
+        return sorted_dict
 
 
     def _expected_mapsize(self, data):

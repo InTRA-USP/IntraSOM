@@ -591,11 +591,16 @@ class PlotFactory(object):
                     som_bmus = (project_samples_label.BMU.values-1).tolist()
                     rep_samples_dic = select_keys(self.rep_sample(project = project_samples_label), som_bmus)
                 else:
-                    samples_label_index = self.sample_names if samples_label_index == "all" else np.array(samples_label_index) 
-                    samples_label_names = self.sample_names[samples_label_index]
+                    if samples_label_index == "all":
+                        samples_label_names = self.sample_names
+                        samples_label_index = np.arange(0, len(samples_label_names), 1)
+                    else:
+                        samples_label_index = np.array(samples_label_index)
+                        samples_label_names = self.sample_names[samples_label_index]
+                    
 
                     som_bmus = self.bmus.astype(int)[samples_label_index]
-                    rep_samples_dic = select_keys(self.rep_sample(), som_bmus)
+                    rep_samples_dic = select_keys(self.rep_sample(), som_bmus+1)
 
                 if save_labels_rep:
                     def filter_dictionary(dictionary, values):
@@ -621,14 +626,15 @@ class PlotFactory(object):
                 for j in range(self.mapsize[1]):
                     for i in range(self.mapsize[0]):
                         try:
-                            if isinstance(rep_samples_dic[counter], list):
-                                total = len(rep_samples_dic[counter])
-                                selected_samples = list(set(samples_label_names).intersection(set(rep_samples_dic[counter])))
-                                sample_name, idx_sample = search_strings(selected_samples, rep_samples_dic[counter])
+                            if isinstance(rep_samples_dic[counter+1], list):
+                                total = len(rep_samples_dic[counter+1])
+                                selected_samples = list(set(samples_label_names).intersection(set(rep_samples_dic[counter+1])))
+                                sample_name, idx_sample = search_strings(selected_samples, rep_samples_dic[counter+1])
                                 rep_sample_name = f"{sample_name}({idx_sample+1}/{total})"
                                                                 
                             else:
-                                rep_sample_name = rep_samples_dic[counter]
+                                rep_sample_name = rep_samples_dic[counter+1]
+                            
                             hex = RegularPolygon((xx[(j, i)]*2,
                                                 yy[(j,i)]*2),
                                                 numVertices=6,
