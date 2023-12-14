@@ -315,6 +315,8 @@ class SOM(object):
                 self.mapsize = mapsize
         else:
             self.mapsize = self._expected_mapsize(self._data)
+        self.QE = 0
+        self.QE_expanded = np.zeros(self._dlen)
 
         self.lattice = lattice
         self.training = training
@@ -411,11 +413,10 @@ class SOM(object):
         dic["dist_factor"] = self.dist_factor
         dic["bmus"] = self._bmu[0].astype(int).tolist()
         if self.missing == True:
-            dic["bmus_dist"] = self._bmu[1].tolist()
+            dic["bmus_dist"] = list(self.QE_expanded)
             dic["missing_imput"] = list(self.data_missing["nan_values"])
         elif self.missing == False:
-            fixed_euclidean_x2 = np.einsum('ij,ij->i', np.nan_to_num(self.get_data, nan=0.0), np.nan_to_num(self.get_data, nan=0.0))
-            dic["bmus_dist"] = np.sqrt(self._bmu[1] + fixed_euclidean_x2).tolist()
+            dic["bmus_dist"] = list(self.QE_expanded)
             
         
         # Fix serialization problems
@@ -553,7 +554,7 @@ class SOM(object):
         results_df = bmu_df.iloc[bmus,:]
 
         # Enter the quantization error for each vector
-        QE = self.calculate_quantization_error_expanded if self.missing == True else np.around(np.sqrt(self._bmu[1]), decimals=4)
+        QE = self.QE_expanded
         results_df.insert(1, "q-error", QE)
 
         # Change index with the sample names
@@ -643,8 +644,7 @@ class SOM(object):
         # Training Quality Parameters
         text_file.write(f"Training Evaluation:\n")
         text_file.write(f"\n")
-        QE = round(self.calculate_quantization_error, 4) if self.missing == True else round(np.mean(np.sqrt(self._bmu[1])),4)
-        text_file.write(f"Quantization Error: {QE}\n")
+        text_file.write(f"Quantization Error: {round(self.QE,4)}\n")
         text_file.write(f"Topographic Error: {round(self.topographic_error, 4)}\n")
         text_file.close()
         print("Training Report Created")
@@ -1149,6 +1149,7 @@ class SOM(object):
         bmu = None
 
         # Training process for inputs with complete data
+
         if self.missing == False:     
             if shared_memory:
                 data = self.get_data
@@ -1193,9 +1194,12 @@ class SOM(object):
                     # the encounter of the BMU for each input data, but it is necessary for the calculation of the
                     # quantification error
                     fixed_euclidean_x2 = np.einsum('ij,ij->i', np.nan_to_num(data[bootstrap_i], nan=0.0), np.nan_to_num(data[bootstrap_i], nan=0.0))
+                    partial_qe = np.sqrt(abs(bmu[1] + fixed_euclidean_x2))
+                    self.QE_expanded[bootstrap_i] = partial_qe
+                    self.QE = np.mean(self.QE_expanded)
 
                     # Progress bar update
-                    pbar.set_description(f"Epoch: {i+1}. Radius:{round(radius[i],2)}. QE: {round(np.mean(np.sqrt(bmu[1] + fixed_euclidean_x2)),4)}")
+                    pbar.set_description(f"Epoch: {i+1}. Radius:{round(radius[i],2)}. QE: {round(self.QE,4)}")
 
 
                     # Update only the BMU of the vectors that participated in this training epoch
@@ -1220,9 +1224,11 @@ class SOM(object):
                     # the encounter of the BMU for each input data, but it is necessary for the calculation of the
                     # error quantification
                     fixed_euclidean_x2 = np.einsum('ij,ij->i', np.nan_to_num(data, nan=0.0), np.nan_to_num(data, nan=0.0))
+                    self.QE_expanded = np.sqrt(abs(bmu[1] + fixed_euclidean_x2))
+                    self.QE = np.mean(self.QE_expanded)
 
                     # Progress bar update
-                    pbar.set_description(f"Epoch: {i+1}. Radius:{round(radius[i],2)}. QE: {round(np.mean(np.sqrt(bmu[1] + fixed_euclidean_x2)),4)}")
+                    pbar.set_description(f"Epoch: {i+1}. Radius:{round(radius[i],2)}. QE: {round(self.QE,4)}")
                     
                     # Atualizar os BMUs
                     self._bmu = bmu
@@ -1244,6 +1250,7 @@ class SOM(object):
             # Progress bar
             pbar = tqdm(range(trainlen), mininterval=1)
             for i in pbar:
+                ## REVIEW THE QUANTIZATION ERROR CALCULATION
                 if self.bootstrap:
                     # Pass all the data in the last training epoch, to guarantee that
                     # all vectors have BMU
@@ -1300,8 +1307,10 @@ class SOM(object):
                             self.nan_value_hist.append(self.data_missing["nan_values"])
 
                         # Progress bar update
-                        QE = round(np.mean(np.sqrt(bmu[1])),4)
-                        pbar.set_description(f"Epoch: {i+1}. Radius:{round(radius[i],2)}. QE: {QE}")
+                        self.QE_expanded[bootstrap_i] = bmu[1]
+                        self.QE = np.mean(self.QE_expanded)
+
+                        pbar.set_description(f"Epoch: {i+1}. Radius:{round(radius[i],2)}. QE: {round(self.QE,4)}")
 
                     # Display imputed matrix in fine training
                     elif self.actual_train == "Fine":
@@ -1311,7 +1320,6 @@ class SOM(object):
 
                             # Find the BMU data
                             bmu = self._find_bmu(data[bootstrap_i], njb=njob)
-                            fixed_euclidean_x2 = np.einsum('ij,ij->i', np.nan_to_num(data[bootstrap_i], nan=0.0), np.nan_to_num(data[bootstrap_i], nan=0.0))
 
 
                             # Fill the empty data locations with the values ​​found in the BMU
@@ -1336,16 +1344,21 @@ class SOM(object):
                             # Update missing data
                             self.data_missing["nan_values"] = data[self.data_missing["indices"]]
 
+
+                            # Progress bar update
+                            fixed_euclidean_x2 = np.einsum('ij,ij->i', np.nan_to_num(data[bootstrap_i], nan=0.0), np.nan_to_num(data[bootstrap_i], nan=0.0))
+                            partial_qe = np.sqrt(abs(bmu[1] + fixed_euclidean_x2))
+                            self.QE_expanded[bootstrap_i] = partial_qe
+                            self.QE = np.mean(self.QE_expanded)
+                            pbar.set_description(f"Epoch: {i+1}. Radius:{round(radius[i],2)}. QE: {round(self.QE,4)}. Reg:{round(reg,2)}")
+
+                            
                             # Delete the data in the data variable
                             data[self.data_missing["indices"]] = np.full(len(self.data_missing["indices"][0]), np.nan)
 
                             if self.save_nan_hist:
                                 # Add to nan's processing history
                                 self.nan_value_hist.append(self.data_missing["nan_values"])
-
-                            # Progress bar update
-                            QE = round(np.mean(np.sqrt(bmu[1] + fixed_euclidean_x2)),4)
-                            pbar.set_description(f"Epoch: {i+1}. Radius:{round(radius[i],2)}. QE: {QE}. Reg:{round(reg,2)}")
                         else:
                             # Find the BMU data
                             bmu = self._find_bmu(data[bootstrap_i], njb=njob)
@@ -1382,8 +1395,10 @@ class SOM(object):
                                 self.nan_value_hist.append(self.data_missing["nan_values"])
 
                             # Progress bar update
-                            QE = round(np.mean(np.sqrt(bmu[1])),4)
-                            pbar.set_description(f"Epoch: {i+1}. Radius:{round(radius[i],2)}. QE: {QE}")
+                            partial_qe = bmu[1]
+                            self.QE_expanded[bootstrap_i] = partial_qe
+                            self.QE = np.mean(self.QE_expanded)
+                            pbar.set_description(f"Epoch: {i+1}. Radius:{round(radius[i],2)}. QE: {round(self.QE,4)}")
 
                     if self.history_plot:
                         if i%2 == 0:
@@ -1395,6 +1410,7 @@ class SOM(object):
 
                     # Update only the BMU of the vectors that participated in this training epoch
                     self._bmu[:, bootstrap_i] = bmu
+                # Not bootstrap training
                 else:
                     # Define the neighborhood for each specified radius
                     neighborhood = self.neighborhood.calculate(
@@ -1435,8 +1451,9 @@ class SOM(object):
                             self.nan_value_hist.append(self.data_missing["nan_values"])
 
                         # Progress bar update
-                        QE = round(np.mean(np.sqrt(bmu[1])),4)
-                        pbar.set_description(f"Epoch: {i+1}. Radius:{round(radius[i],2)}. QE: {QE}")
+                        self.QE_expanded = bmu[1]
+                        self.QE = np.mean(self.QE_expanded)
+                        pbar.set_description(f"Epoch: {i+1}. Radius:{round(radius[i],2)}. QE: {round(self.QE,4)}")
 
                     # Display matrix inputed in fine training
                     elif self.actual_train == "Fine":
@@ -1447,8 +1464,6 @@ class SOM(object):
 
                             # Find the BMU data
                             bmu = self._find_bmu(data, njb=njob)
-                            fixed_euclidean_x2 = np.einsum('ij,ij->i', np.nan_to_num(data, nan=0.0), np.nan_to_num(data, nan=0.0))
-
 
                             # Fill the empty data locations with the values ​​found in the BMU
                             # every iteration
@@ -1480,8 +1495,10 @@ class SOM(object):
                                 self.nan_value_hist.append(self.data_missing["nan_values"])
 
                             # Progress bar update
-                            QE = round(np.mean(np.sqrt(bmu[1] + fixed_euclidean_x2)),4)
-                            pbar.set_description(f"Epoch: {i+1}. Radius:{round(radius[i],2)}. QE: {QE}. Reg:{round(reg,2)}")
+                            fixed_euclidean_x2 = np.einsum('ij,ij->i', np.nan_to_num(data, nan=0.0), np.nan_to_num(data, nan=0.0))
+                            self.QE_expanded = np.sqrt(abs(bmu[1] + fixed_euclidean_x2))
+                            self.QE = np.mean(self.QE_expanded)
+                            pbar.set_description(f"Epoch: {i+1}. Radius:{round(radius[i],2)}. QE: {round(self.QE,4)}. Reg:{round(reg,2)}")
                         else:
                             # Find the BMU data
                             bmu = self._find_bmu(data, njb=njob)
@@ -1513,8 +1530,9 @@ class SOM(object):
                                 self.nan_value_hist.append(self.data_missing["nan_values"])
 
                             # Progress bar update
-                            QE = round(np.mean(np.sqrt(bmu[1])),4)
-                            pbar.set_description(f"Epoch: {i+1}. Radius:{round(radius[i],2)}. QE: {QE}")
+                            self.QE_expanded = bmu[1]
+                            self.QE = np.mean(self.QE_expanded)
+                            pbar.set_description(f"Epoch: {i+1}. Radius:{round(radius[i],2)}. QE: {round(self.QE,4)}")
 
                     if self.history_plot:
                         if i%2 == 0:
@@ -1849,21 +1867,6 @@ class SOM(object):
         topo_error = error_counter/bmus1_ind.shape[0]
 
         return topo_error
-
-
-    @property
-    def calculate_quantization_error(self):
-        data = self.get_data
-        data[self.data_missing["indices"]] = self.data_missing["nan_values"]
-        fixed_euclidean_x2 = np.einsum('ij,ij->i', np.nan_to_num(self.get_data, nan=0.0), np.nan_to_num(self.get_data, nan=0.0))
-        return np.mean(np.sqrt(np.abs(self._bmu[1] + fixed_euclidean_x2)))
-    
-    @property
-    def calculate_quantization_error_expanded(self):
-        data = self.get_data
-        data[self.data_missing["indices"]] = self.data_missing["nan_values"]
-        fixed_euclidean_x2 = np.einsum('ij,ij->i', np.nan_to_num(self.get_data, nan=0.0), np.nan_to_num(self.get_data, nan=0.0))
-        return np.sqrt(np.abs(self._bmu[1] + fixed_euclidean_x2))
         
 
     def build_umatrix(self, expanded=False):
