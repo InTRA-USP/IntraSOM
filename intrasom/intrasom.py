@@ -1829,6 +1829,15 @@ class SOM(object):
         return bmu
     
     @property
+    def calculate_quantization_error(self):
+        return self.QE
+    
+    @property
+    def calculate_quantization_error_expanded(self):
+        return self.QE_expanded
+
+    
+    @property
     def topographic_error(self):
         """
         Function to calculate the topographic error.
