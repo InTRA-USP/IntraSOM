@@ -922,6 +922,7 @@ class PlotFactory(object):
             f.savefig(path_name,dpi=300, bbox_inches = "tight")
 
         if save:
+            label_name = file_name if file_name is not None else label_name
             if file_path:
                 path_name = check_path(f"{file_path}/{label_name}.jpg")
                 f.savefig(path_name,dpi=300, bbox_inches = "tight")
