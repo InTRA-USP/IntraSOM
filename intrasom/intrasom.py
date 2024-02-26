@@ -48,7 +48,8 @@ class SOMFactory(object):
               missing=False,
               save_nan_hist=False,
               pred_size=0,
-              dist_factor = 2):
+              dist_factor = 2, 
+              pace_size=100_000):
         """
 
          onstructs an object for SOM training, with the data parameters,
@@ -157,7 +158,8 @@ class SOMFactory(object):
                    missing = missing,
                    save_nan_hist=save_nan_hist,
                    pred_size = pred_size,
-                   dist_factor = dist_factor)
+                   dist_factor = dist_factor,
+                   pace_size=pace_size)
 
     @staticmethod
     def load_som(data,
@@ -203,6 +205,7 @@ class SOMFactory(object):
         bmus = np.array([bmus_ind, bmus_dist])
         dist_factor = params["dist_factor"]
         load_param=True
+        pace_size = params["pace_size"]
 
         return SOM(data = data,
                    neighborhood = neigh_calc,
@@ -224,7 +227,8 @@ class SOMFactory(object):
                    load_param = load_param,
                    trained_neurons = trained_neurons, 
                    bmus = bmus,
-                   dist_factor = dist_factor)
+                   dist_factor = dist_factor,
+                   pace_size=pace_size)
 
 class SOM(object):
 
@@ -250,10 +254,12 @@ class SOM(object):
                  load_param=False,
                  trained_neurons=None, 
                  bmus = None,
-                 dist_factor = 2):
+                 dist_factor = 2,
+                 pace_size=100_000):
 
         # Mask for missing values
         self.mask = mask
+        self.pace_size = pace_size
 
         # Check input type and fill in internal attributes
         print("Loading dataframe...")
@@ -404,6 +410,7 @@ class SOM(object):
         dic["normalization"] = self._normalization
         dic["initialization"] = self.initialization
         dic["training"] = self.training
+        dic["pace_size"] = self.pace_size
         dic["name"] = self.name
         dic["component_names"] = list(self._component_names)
         dic["unit_names"] = list(self._unit_names)
@@ -775,7 +782,7 @@ class SOM(object):
         self.data_proj_norm = data_proj
 
         # Find the BMU for this new data
-        bmus = self._find_bmu(data_proj, project=True)
+        bmus = self._find_bmu(data_proj, project=True, pace_size=self.pace_size)
         bmus_ind = bmus[0].astype(int)
 
         # Rescue the BMU dataframe
@@ -1182,7 +1189,7 @@ class SOM(object):
                         self._distance_matrix, radius[i], self.codebook.nnodes)
 
                     # Find the BMU for the data
-                    bmu = self._find_bmu(data[bootstrap_i], njb=njob)
+                    bmu = self._find_bmu(data[bootstrap_i], njb=njob, pace_size=self.pace_size)
 
                     # Update the BMU with the data
                     self.codebook.matrix = self._update_codebook_voronoi(data[bootstrap_i],
@@ -1212,7 +1219,7 @@ class SOM(object):
                         self._distance_matrix, radius[i], self.codebook.nnodes)
 
                     # Find the BMU for the data
-                    bmu = self._find_bmu(data, njb=njob)
+                    bmu = self._find_bmu(data, njb=njob, pace_size=self.pace_size)
 
                     # Update the BMU with the data
                     self.codebook.matrix = self._update_codebook_voronoi(data,
@@ -1273,7 +1280,7 @@ class SOM(object):
                     # Display incomplete matrix in rough training
                     if self.actual_train == "Rough":
                         # Find the BMU data
-                        bmu = self._find_bmu(data[bootstrap_i], njb=njob)
+                        bmu = self._find_bmu(data[bootstrap_i], njb=njob, pace_size=self.pace_size)
                         
                         # Update the weights according to the specified neighborhood function
                         self.codebook.matrix = self._update_codebook_voronoi(data[bootstrap_i],
@@ -1319,7 +1326,7 @@ class SOM(object):
                             data[self.data_missing["indices"]] = self.data_missing["nan_values"]
 
                             # Find the BMU data
-                            bmu = self._find_bmu(data[bootstrap_i], njb=njob)
+                            bmu = self._find_bmu(data[bootstrap_i], njb=njob, pace_size=self.pace_size)
 
 
                             # Fill the empty data locations with the values ​​found in the BMU
@@ -1361,7 +1368,7 @@ class SOM(object):
                                 self.nan_value_hist.append(self.data_missing["nan_values"])
                         else:
                             # Find the BMU data
-                            bmu = self._find_bmu(data[bootstrap_i], njb=njob)
+                            bmu = self._find_bmu(data[bootstrap_i], njb=njob, pace_size=self.pace_size)
                             
                             # Update the weights according to the specified neighborhood function
                             self.codebook.matrix = self._update_codebook_voronoi(data[bootstrap_i],
@@ -1422,7 +1429,7 @@ class SOM(object):
                     # Display incomplete matrix in rough training
                     if self.actual_train == "Rough":
                         # Find the BMU data
-                        bmu = self._find_bmu(data, njb=njob)
+                        bmu = self._find_bmu(data, njb=njob, pace_size=self.pace_size)
 
                         # Update the weights according to the specified neighborhood function
                         self.codebook.matrix = self._update_codebook_voronoi(data,
@@ -1463,7 +1470,7 @@ class SOM(object):
                             data[self.data_missing["indices"]] = self.data_missing["nan_values"]
 
                             # Find the BMU data
-                            bmu = self._find_bmu(data, njb=njob)
+                            bmu = self._find_bmu(data, njb=njob, pace_size=self.pace_size)
 
                             # Fill the empty data locations with the values ​​found in the BMU
                             # every iteration
@@ -1501,7 +1508,7 @@ class SOM(object):
                             pbar.set_description(f"Epoch: {i+1}. Radius:{round(radius[i],2)}. QE: {round(self.QE,4)}. Reg:{round(reg,2)}")
                         else:
                             # Find the BMU data
-                            bmu = self._find_bmu(data, njb=njob)
+                            bmu = self._find_bmu(data, njb=njob, pace_size=self.pace_size)
 
                             # Update the weights according to the specified neighborhood function
                             self.codebook.matrix = self._update_codebook_voronoi(data,
@@ -1551,7 +1558,8 @@ class SOM(object):
                  input_matrix,
                  njb=-1,
                  nth=1,
-                 project=False):
+                 project=False, 
+                 pace_size=100_000):
         """
         Finds the BMU (Best Matching Units) for each input data through
         of the input data matrix. In a unified way parallelizing the
@@ -1604,7 +1612,8 @@ class SOM(object):
                                                           y2,
                                                           nth=nth, 
                                                           project=project,
-                                                          missing=missing_proj),
+                                                          missing=missing_proj, 
+                                                          pace_size=pace_size),
                                                           chunks)
             else:
                 # Map the data chunks and apply the chunk_bmu_finder method on each chunk, finding the BMU for each chunk
@@ -1612,7 +1621,8 @@ class SOM(object):
                                     self.codebook.matrix[:, :input_matrix.shape[1]], 
                                     y2=y2,
                                     project=project,
-                                    nth=nth),
+                                    nth=nth,
+                                    pace_size=pace_size),
                              chunks)
                 
         else:
@@ -1622,14 +1632,16 @@ class SOM(object):
                                                           self.codebook.matrix,
                                                           y2=y2,
                                                           nth=nth, 
-                                                          missing=True),
+                                                          missing=True,
+                                                          pace_size=pace_size),
                                                           chunks)
             else:
                 # Map the data chunks and apply the chunk_bmu_finder method on each chunk, finding the BMU for each chunk
                 b = pool.map(lambda chk: chunk_bmu_finder(chk,
                                                           self.codebook.matrix, 
                                                           y2,
-                                                          nth=nth),
+                                                          nth=nth,
+                                                          pace_size=pace_size),
                                                           chunks)
         pool.close()
         pool.join()
@@ -1707,7 +1719,8 @@ class SOM(object):
                             y2=None, 
                             nth=1, 
                             missing=False,
-                            project=False):
+                            project=False, 
+                            pace_size = 100_000):
         """
         Finds the BMU corresponding to the input data matrix.
 
@@ -1754,7 +1767,7 @@ class SOM(object):
         nnodes = codebook.shape[0]
 
         # Batch size
-        blen = min(50, dlen)
+        blen = min(pace_size, dlen)
 
         # While loop initializer
         i0 = 0
@@ -1842,8 +1855,8 @@ class SOM(object):
         """
         Function to calculate the topographic error.
         """
-        bmus1 = self._find_bmu(self.get_data, nth=1)[0].astype(int)
-        bmus2 = self._find_bmu(self.get_data, nth=2)[0].astype(int)
+        bmus1 = self._find_bmu(self.get_data, nth=1, pace_size=self.pace_size)[0].astype(int)
+        bmus2 = self._find_bmu(self.get_data, nth=2, pace_size=self.pace_size)[0].astype(int)
 
         rows = self.mapsize[1]
         cols = self.mapsize[0]
