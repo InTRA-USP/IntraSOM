@@ -49,7 +49,7 @@ class SOMFactory(object):
               save_nan_hist=False,
               pred_size=0,
               dist_factor = 2, 
-              pace_size=100_000):
+              pace_size=500):
         """
 
          onstructs an object for SOM training, with the data parameters,
@@ -863,7 +863,7 @@ class SOM(object):
               train_len_factor=1,
               maxtrainlen=1000, 
               history_plot = False,
-              previous_epoch = False):
+              previous_epoch = True):
         """
         Class method for training the SOM object.
 
