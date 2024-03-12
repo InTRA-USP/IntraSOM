@@ -588,8 +588,8 @@ class PlotFactory(object):
             if samples_label:
                 if project_samples_label is not None:
                     samples_label_names = project_samples_label.index.tolist()
-                    som_bmus = (project_samples_label.BMU.values-1).tolist()
-                    rep_samples_dic = select_keys(self.rep_sample(project = project_samples_label), som_bmus)
+                    som_bmus = project_samples_label.BMU.values.tolist()
+                    rep_samples_dic = select_keys(self.rep_sample(project=project_samples_label), som_bmus)
                 else:
                     if samples_label_index == "all":
                         samples_label_names = self.sample_names
@@ -597,7 +597,6 @@ class PlotFactory(object):
                     else:
                         samples_label_index = np.array(samples_label_index)
                         samples_label_names = self.sample_names[samples_label_index]
-                    
 
                     som_bmus = self.bmus.astype(int)[samples_label_index]
                     rep_samples_dic = select_keys(self.rep_sample(), som_bmus+1)
@@ -620,7 +619,7 @@ class PlotFactory(object):
                         for key, value in rep_samples_dic_filter.items():
                             if isinstance(value, list):
                                 value = ', '.join(value)
-                            file.write(f'BMU {key+1}: {value}\n')
+                            file.write(f'BMU {key}: {value}\n')
                 
                 counter = 0
                 for j in range(self.mapsize[1]):
