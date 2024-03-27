@@ -1915,21 +1915,44 @@ class SOM(object):
         weights = np.reshape(self.codebook.matrix, (self.mapsize[1], self.mapsize[0], self.codebook.matrix.shape[1]))
 
         # Neighbor hexagonal search
-        ii = [[1, 1, 0, -1, 0, 1], [1, 0,-1, -1, -1, 0]]
-        jj = [[0, 1, 1, 0, -1, -1], [0, 1, 1, 0, -1, -1]]
-
-        # Initialize U-Matrix
-        um = np.nan * np.zeros((weights.shape[0], weights.shape[1], 6))
+        if self.lattice == 'hexa':
+            ii = [[1, 1, 0, -1, 0, 1], [1, 0,-1, -1, -1, 0]]
+            jj = [[0, 1, 1, 0, -1, -1], [0, 1, 1, 0, -1, -1]]
+            # Initialize U-Matrix
+            um = np.nan * np.zeros((weights.shape[0], weights.shape[1], 6))
+        ## elif condition not used becausa no quad lattice is implemented
+        # elif self.lattice == 'quad':
+        #    ii = [[1, 0, -1,  0], [1, 0, -1,  0]]
+        #    jj = [[0, 1,  0, -1], [0, 1,  0, -1]]
+        #    # Initialize U-Matrix
+        #    um = np.nan * np.zeros((weights.shape[0], weights.shape[1], 4))
+        else:
+            raise Exception("build_umatrix error: non hexagonal lattice not implemented!")
 
         # Fill U-Matrix
-        for y in range(weights.shape[0]):
-            for x in range(weights.shape[1]):
-                w_2 = weights[y, x]
-                e = y % 2 == 0
-                for k, (i, j) in enumerate(zip(ii[e], jj[e])):
-                    if (x+i >= 0 and x+i < weights.shape[1] and y+j >= 0 and y+j < weights.shape[0]):
-                        w_1 = weights[y+j, x+i]
+        if self.mapshape == 'planar':
+            for y in range(weights.shape[0]):
+                for x in range(weights.shape[1]):
+                    w_2 = weights[y, x]
+                    e = y % 2 == 0
+                    for k, (i, j) in enumerate(zip(ii[e], jj[e])):
+                        if (x+i >= 0 and x+i < weights.shape[1] and y+j >= 0 and y+j < weights.shape[0]): ## if not periodic (non toroidal)
+                            w_1 = weights[y+j, x+i]
+                            um[y, x, k] = fast_norm(w_2-w_1)
+                    # this is needed to avoid identation error with the outer elif
+        elif self.mapshape == 'toroid': # trick for periodic
+            for y in range(weights.shape[0]):
+                for x in range(weights.shape[1]):
+                    w_2 = weights[y, x]
+                    e = y % 2 == 0
+                    for k, (i, j) in enumerate(zip(ii[e], jj[e])):
+                        index_y = ( y + j ) % self.mapsize[1] ## neighbors - -1 is handled by numpy, but beyond the mapsize we use % mapsize trick
+                        index_x = ( x + i ) % self.mapsize[0] ## neighbors - -1 is handled by numpy, but beyond the mapsize we use % mapsize trick
+                        w_1 = weights[ index_y, index_x]
                         um[y, x, k] = fast_norm(w_2-w_1)
+        else:
+            raise Exception("mapshape '%s' not acceptable"%self.mapshape)
+            
         if expanded:
             # Expanded U-Matrix
             return um
