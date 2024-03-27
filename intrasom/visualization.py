@@ -39,60 +39,63 @@ class PlotFactory(object):
         self.rep_sample = som_object.rep_sample
         self.data_denorm = som_object.denorm_data(som_object._data)
         self.data_proj_norm = som_object.data_proj_norm
+        ## added
+        self.build_umatrix = som_object.build_umatrix
         
         # Load foot image
         image_file = pkg_resources.resource_filename('intrasom', 'images/foot.jpg')
         self.foot = Image.open(image_file)
 
-    def build_umatrix(self, expanded=False, log=False):
-        """
-        Function to calculate the U-Matrix of unified distances from the trained weight matrix.
-
-        Args:
-            exapanded: Boolean value to indicate whether the return will be the summarized 
-                U-Matrix (average distances of the 6 neighboring BMUs) or the expanded 
-                U-Matrix (all distance values).
-            
-            log: Returns the base 10 logarithm for the distance values. It is used when 
-                there are samples with a large dissimilarity boundary that masks the 
-                visualization of the U-Matrix. The logarithmic transformation of these 
-                values allows for a better visualization of the matrix.
-
-        Returns:
-            Expanded or summarized U-Matrix of distances.
-        """
-        # Function to find distance quickly
-        def fast_norm(x):
-            """
-            Returns the L2 norm of a 1-D array.
-            """
-            return sqrt(dot(x, x.T))
-
-        # Neurons weights matrix
-        weights = np.reshape(self.codebook, (self.mapsize[1], self.mapsize[0], self.codebook.shape[1]))
-
-        # Neighbor hexagonal search
-        ii = [[1, 1, 0, -1, 0, 1], [1, 0,-1, -1, -1, 0]]
-        jj = [[0, 1, 1, 0, -1, -1], [0, 1, 1, 0, -1, -1]]
-
-        # Initialize U Matrix
-        um = np.nan * np.zeros((weights.shape[0], weights.shape[1], 6))
-
-        # Fill U-matrix
-        for y in range(weights.shape[0]):
-            for x in range(weights.shape[1]):
-                w_2 = weights[y, x]
-                e = y % 2 == 0
-                for k, (i, j) in enumerate(zip(ii[e], jj[e])):
-                    if (x+i >= 0 and x+i < weights.shape[1] and y+j >= 0 and y+j < weights.shape[0]):
-                        w_1 = weights[y+j, x+i]
-                        um[y, x, k] = fast_norm(w_2-w_1)
-        if expanded:
-            # Expanded U Matrix
-            return np.log(um) if log else um
-        else:
-            # Reduced U Matrix
-            return nanmean(np.log(um), axis=2) if log else nanmean(um, axis=2)
+    # def build_umatrix(self, expanded=False, log=False):
+    #     """
+    #     Function to calculate the U-Matrix of unified distances from the trained weight matrix.
+    # 
+    #     Args:
+    #         exapanded: Boolean value to indicate whether the return will be the summarized 
+    #             U-Matrix (average distances of the 6 neighboring BMUs) or the expanded 
+    #             U-Matrix (all distance values).
+    #         
+    #         log: Returns the base 10 logarithm for the distance values. It is used when 
+    #             there are samples with a large dissimilarity boundary that masks the 
+    #             visualization of the U-Matrix. The logarithmic transformation of these 
+    #             values allows for a better visualization of the matrix.
+    # 
+    #     Returns:
+    #         Expanded or summarized U-Matrix of distances.
+    #     """
+    #     # Function to find distance quickly
+    #     def fast_norm(x):
+    #         """
+    #         Returns the L2 norm of a 1-D array.
+    #         """
+    #         return sqrt(dot(x, x.T))
+    # 
+    #     print('Using visualization.py definition')
+    #     # Neurons weights matrix
+    #     weights = np.reshape(self.codebook, (self.mapsize[1], self.mapsize[0], self.codebook.shape[1]))
+    # 
+    #     # Neighbor hexagonal search
+    #     ii = [[1, 1, 0, -1, 0, 1], [1, 0,-1, -1, -1, 0]]
+    #     jj = [[0, 1, 1, 0, -1, -1], [0, 1, 1, 0, -1, -1]]
+    # 
+    #     # Initialize U Matrix
+    #     um = np.nan * np.zeros((weights.shape[0], weights.shape[1], 6))
+    # 
+    #     # Fill U-matrix
+    #     for y in range(weights.shape[0]):
+    #         for x in range(weights.shape[1]):
+    #             w_2 = weights[y, x]
+    #             e = y % 2 == 0
+    #             for k, (i, j) in enumerate(zip(ii[e], jj[e])):
+    #                 if (x+i >= 0 and x+i < weights.shape[1] and y+j >= 0 and y+j < weights.shape[0]):
+    #                     w_1 = weights[y+j, x+i]
+    #                     um[y, x, k] = fast_norm(w_2-w_1)
+    #     if expanded:
+    #         # Expanded U Matrix
+    #         return np.log(um) if log else um
+    #     else:
+    #         # Reduced U Matrix
+    #         return nanmean(np.log(um), axis=2) if log else nanmean(um, axis=2)
                         
     def plot_umatrix(self,
                      figsize = (10,10),

@@ -34,6 +34,7 @@ class ClusterFactory(object):
         self.unit_names = som_object._unit_names
         self.neurons_dataframe = som_object.neurons_dataframe
         self.sample_names = som_object._sample_names
+        self.build_umatrix = som_object.build_umatrix
         # Load foot image
         image_file = pkg_resources.resource_filename('intrasom', 'images/foot.jpg')
         self.foot = Image.open(image_file)
@@ -848,51 +849,51 @@ class ClusterFactory(object):
         return coordinates
     
 
-    def build_umatrix(self, expanded=False, log=False):
-        """
-        Function to calculate the U Matrix of unified distances from the
-        trained weight matrix.
-
-        Args:
-            expanded: boolean value to indicate whether the return will be from the summarized
-                or unified matrix of distances (average of distances from the 6
-                neighborhood BMUs) or expanded (all distance values)
-                
-        Returns:
-            Expanded or summarized unified distance matrix.
-        """
-        # Function to find distance quickly
-        def fast_norm(x):
-            """
-            Returns the L2 norm of a 1-D array.
-            """
-            return sqrt(dot(x, x.T))
-
-        # Matrix of BMUs weights
-        weights = np.reshape(self.codebook, (self.mapsize[1], self.mapsize[0], self.codebook.shape[1]))
-
-        # Neighbor hexagonal search
-        ii = [[1, 1, 0, -1, 0, 1], [1, 0,-1, -1, -1, 0]]
-        jj = [[0, 1, 1, 0, -1, -1], [0, 1, 1, 0, -1, -1]]
-
-        # Initialize U Matrix
-        um = np.nan * np.zeros((weights.shape[0], weights.shape[1], 6))
-
-        # Fill U Matrix
-        for y in range(weights.shape[0]):
-            for x in range(weights.shape[1]):
-                w_2 = weights[y, x]
-                e = y % 2 == 0
-                for k, (i, j) in enumerate(zip(ii[e], jj[e])):
-                    if (x+i >= 0 and x+i < weights.shape[1] and y+j >= 0 and y+j < weights.shape[0]):
-                        w_1 = weights[y+j, x+i]
-                        um[y, x, k] = fast_norm(w_2-w_1)
-        if expanded:
-            # Expanded U matrix
-            return np.log(um) if log else um
-        else:
-            # Reduced U matrix
-            return nanmean(np.log(um), axis=2) if log else nanmean(um, axis=2)
+    # def build_umatrix(self, expanded=False, log=False):
+    #     """
+    #     Function to calculate the U Matrix of unified distances from the
+    #     trained weight matrix.
+    # 
+    #     Args:
+    #         expanded: boolean value to indicate whether the return will be from the summarized
+    #             or unified matrix of distances (average of distances from the 6
+    #             neighborhood BMUs) or expanded (all distance values)
+    #             
+    #     Returns:
+    #         Expanded or summarized unified distance matrix.
+    #     """
+    #     # Function to find distance quickly
+    #     def fast_norm(x):
+    #         """
+    #         Returns the L2 norm of a 1-D array.
+    #         """
+    #         return sqrt(dot(x, x.T))
+    # 
+    #     # Matrix of BMUs weights
+    #     weights = np.reshape(self.codebook, (self.mapsize[1], self.mapsize[0], self.codebook.shape[1]))
+    # 
+    #     # Neighbor hexagonal search
+    #     ii = [[1, 1, 0, -1, 0, 1], [1, 0,-1, -1, -1, 0]]
+    #     jj = [[0, 1, 1, 0, -1, -1], [0, 1, 1, 0, -1, -1]]
+    # 
+    #     # Initialize U Matrix
+    #     um = np.nan * np.zeros((weights.shape[0], weights.shape[1], 6))
+    # 
+    #     # Fill U Matrix
+    #     for y in range(weights.shape[0]):
+    #         for x in range(weights.shape[1]):
+    #             w_2 = weights[y, x]
+    #             e = y % 2 == 0
+    #             for k, (i, j) in enumerate(zip(ii[e], jj[e])):
+    #                 if (x+i >= 0 and x+i < weights.shape[1] and y+j >= 0 and y+j < weights.shape[0]):
+    #                     w_1 = weights[y+j, x+i]
+    #                     um[y, x, k] = fast_norm(w_2-w_1)
+    #     if expanded:
+    #         # Expanded U matrix
+    #         return np.log(um) if log else um
+    #     else:
+    #         # Reduced U matrix
+    #         return nanmean(np.log(um), axis=2) if log else nanmean(um, axis=2)
         
 
     @property
