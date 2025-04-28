@@ -10,7 +10,7 @@ from math import sqrt
 from sklearn.preprocessing import minmax_scale
 import numpy as np
 from shapely.geometry import Polygon, Point
-from shapely.ops import cascaded_union
+from shapely.ops import unary_union
 import geopandas as gpd
 import pkg_resources
 from PIL import Image
@@ -536,7 +536,7 @@ class ClusterFactory(object):
             # Dissolve the polygons in each GeoSeries
             dissolved_geometries = []
             for geo_series in cluster_geo_series:
-                dissolved_geometry = cascaded_union(geo_series)
+                dissolved_geometry = unary_union(geo_series)
                 dissolved_geometries.append(dissolved_geometry)
 
             # Colors of the clusters
