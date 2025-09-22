@@ -1,0 +1,37 @@
+IntraSOM Training Report
+Project: SOM_iris_dataset
+
+Input Data:
+Features: 4
+Samples: 150
+Cells: 600
+
+--------------------------------------------------
+Initialization Parameters:
+
+Map Size: 10 columns and 6 lines
+Training Polygon: Toroid
+Lattice: Hexagonal
+Normalization: Variance
+Initialization: Randomic
+Neighborhood Function: Gaussian
+Number of Labels: 0
+
+--------------------------------------------------
+Training Parameters:
+
+Rough Training:
+Size: 12
+Initial Ratio: 4.0
+Final Ratio: 1
+
+Finetune Training:
+Size: 20
+Initial Ratio: 1.25
+Final Ratio: 1
+
+--------------------------------------------------
+Training Evaluation:
+
+Quantization Error: 0.459
+Topographic Error: 0.1467
