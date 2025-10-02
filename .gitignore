@@ -1,1 +1,9 @@
 intrasom-venv
+IntraSOM.egg-info
+build
+.github
+examples/gmm.py
+examples/copycat_datasets.ipynb
+examples/Intrasom_report_Example.txt
+examples/Intrasom_report_SOM_iris_dataset.txt
+examples/Intrasom_report_test_iris.txt
