@@ -1,10 +1,16 @@
 from sklearn.metrics import multilabel_confusion_matrix
 from sklearn.metrics import roc_curve, roc_auc_score
+from sklearn.preprocessing import LabelEncoder
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.decomposition import PCA
 import pandas as pd
 import numpy as np
 import os
 from matplotlib import pyplot as plt
-
+import matplotlib.patches as mpatches
+import matplotlib.lines as mlines
+import seaborn as sns
+from typing import Union
 
 class Evaluation(object):
     
@@ -283,4 +289,159 @@ class Evaluation(object):
                     plt.savefig(f"Evaluation/best_lim/best_lim_{labels[label_index][:7]}.png", dpi=200)
             
         return best_lim
-            
+
+    def knn_oversampling(
+        self,
+        samples_labels: Union[list, np.ndarray, pd.Series],
+        pca_plot: bool = True,
+        plt_figsize: tuple = (10,5),
+        plt_title: str = 'SOM and KNN oversampling',
+        normalized: bool = True,
+        n_neighbors: int = 5,
+        weights: str = 'uniform',
+        algorithm: str = 'auto',
+        leaf_size: int = 30,
+        p: int = 2,
+        metric: str = 'minkowski',
+        metric_params = None,
+        n_jobs: int = -1):
+
+        """
+        Function to perform KNN oversampling of the data based on the neurons.
+        Each BMU is used as a candidate for new samples and the KNN analysis.
+        The number of samples generated will vary since not every neuron is a BMU.
+
+        Args:
+            samples_labels: Labels of the samples, in the same order as in the training dataset.
+
+            pca_plot: If True, a PCA plot will be generated showing the original samples and the new samples (BMUs).
+
+            normalized: If True, the data will be normalized (useful when features have different scales).
+                If False, the raw data will be used (it can be more fair if features have the same scales). Default is True.
+
+            n_neighbors: Number of neighbors to use by default for k_neighbors queries.
+
+            weights: Weight function used in prediction. Possible values:
+                'uniform' : uniform weights. All points in each neighborhood are weighted equally.
+                'distance' : weight points by the inverse of their distance. in this case, closer neighbors of a query point will have a greater influence than neighbors which are further away.
+                [callable] : a user-defined function which accepts an array of distances, and returns an array of the same shape containing the weights.
+
+            algorithm: Algorithm used to compute the nearest neighbors:
+                'ball_tree' will use BallTree
+                'kd_tree' will use KDTree
+                'brute' will use a brute-force search.
+                'auto' will attempt to decide the most appropriate algorithm based on the values passed to fit method.
+
+            leaf_size: Leaf size passed to BallTree or KDTree. This can affect the speed of the construction and query, as well as the memory required to store the tree. The optimal value depends on the nature of the problem.
+
+            p: Power parameter for the Minkowski metric. When p = 1, this is equivalent to using manhattan_distance (l1), and euclidean_distance (l2) for p = 2. For arbitrary p, minkowski_distance (l_p) is used.
+
+            metric: the distance metric to use for the tree. The default metric is minkowski, and with p=2 is equivalent to the standard Euclidean metric.
+
+            metric_params: Additional keyword arguments for the metric function.
+
+            n_jobs: The number of parallel jobs to run for neighbors search. -1 means using all processors.
+
+        Returns:
+            A dataframe with the new samples, the index is the neuron number and the column 'Label' contains the predicted label.
+            """
+
+        samples = self.som._data if normalized else self.som.data_raw
+
+        le = LabelEncoder()
+        samples_labels = le.fit_transform(samples_labels) # convert to int labels
+
+        bmu_indices = self.som.results_dataframe['Neuron'].unique() - 1 # -1 to convert to python index
+        bmus = self.som.codebook.matrix[bmu_indices,:] if normalized else self.som.neurons_dataframe.iloc[bmu_indices,7:].values
+
+        # Find the labels for the BMUs
+        neigh = KNeighborsClassifier(
+            n_neighbors=n_neighbors,
+            weights=weights,
+            algorithm=algorithm,
+            leaf_size=leaf_size,
+            p=p,
+            metric=metric,
+            metric_params=metric_params,
+            n_jobs=n_jobs)
+        neigh.fit(samples, samples_labels)
+        bmu_labels = neigh.predict(bmus)
+
+        # Create the new samples dataframe
+        new_samples = pd.DataFrame(data=bmus, columns=self.som.component_names)
+        new_samples['Label'] = le.inverse_transform(bmu_labels) # convert the int labels to the original labels
+        # Add the Neuron number as the index of the dataframe
+        new_samples.index = bmu_indices + 1 # +1 to convert to neuron numbering
+
+        print(f'SOM and KNN oversampling result')
+        print(f'Mapsize: {self.som.mapsize[0]}x{self.som.mapsize[1]} ({self.som.mapsize[0]*self.som.mapsize[1]} neurons)')
+        print(f'Number of new samples (BMUs): {len(bmus)}')
+
+        if pca_plot:
+            pca = PCA(n_components=2)
+            pca_data = pca.fit_transform(samples)
+            pca_bmu = pca.transform(bmus)
+
+            fig, ax = plt.subplots(figsize=plt_figsize)
+            scatter_og = sns.scatterplot(
+                x=pca_data[:,0], 
+                y=pca_data[:,1], 
+                hue=le.inverse_transform(samples_labels),
+                hue_order=le.classes_,
+                palette='gist_rainbow', 
+                alpha=0.3, 
+                edgecolor='k', 
+                legend=False,
+                ax=ax
+            )
+            scatter_new = sns.scatterplot(
+                x=pca_bmu[:,0], 
+                y=pca_bmu[:,1], 
+                hue=new_samples["Label"],
+                hue_order=le.classes_,
+                palette='gist_rainbow', 
+                marker='h',
+                edgecolor='k', 
+                s=80,
+                legend='full',
+                ax=ax
+            )
+
+            # Get the handles/labels from the scatterplot of new samples
+            handles_color, labels_color = scatter_new.get_legend_handles_labels()
+            legend1 = ax.legend(
+                handles_color, labels_color,
+                title_fontsize='12',
+            )
+            ax.add_artist(legend1) 
+
+            # Create custom legend
+            og_marker = mlines.Line2D(
+                [], [], 
+                color='gray', 
+                marker='o', 
+                linestyle='None', 
+                markersize=6,
+                markeredgecolor='k',
+                alpha=0.3, # Match the alpha used in the scatterplot
+                label='Original samples'
+            )
+            new_marker = mlines.Line2D(
+                [], [], 
+                color='gray',
+                marker='h', 
+                linestyle='None', 
+                markersize=9,
+                markeredgecolor='k',
+                label='New samples (BMUs)'
+            )
+
+            ax.legend(handles=[og_marker, new_marker], title='', loc='upper center', bbox_to_anchor=(0.5, -0.12), ncol=2)
+            # Adjust the plot to make room for the legend
+            plt.subplots_adjust(bottom=0.2)
+            plt.xlabel('PC1')
+            plt.ylabel('PC2')
+            plt.title(plt_title)
+            plt.show()
+
+        return new_samples

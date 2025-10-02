@@ -56,10 +56,10 @@ class ClusterRepresentativity(object):
         self._clusters_centroids = cluster_object._clusters_centroids
 
         # Assignments and number of hits
-        self.samples_bmu = cluster_object.som_object.results_dataframe['BMU'] # pandas series, the index is added by 1
+        self.samples_bmu = cluster_object.som_object.results_dataframe['Neuron'] # pandas series, the index is added by 1
         self._neurons_labels = cluster_object._neurons_labels # neurons clusters labels (ranging from 1 to n_clusters)
         self._samples_labels = cluster_object._samples_labels # samples clusters labels (ranging from 0 to n_clusters-1)
-        self.bmu_hits = cluster_object.som_object.results_dataframe['BMU'].value_counts() # pandas series, the index is added by 1
+        self.bmu_hits = cluster_object.som_object.results_dataframe['Neuron'].value_counts() # pandas series, the index is added by 1
 
         # For plotting
         self.mapsize = cluster_object.mapsize # (n_columns, n_rows)

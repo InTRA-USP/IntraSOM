@@ -535,9 +535,9 @@ class SOM(object):
         neuron_df.insert(0, "Ret_y", rec_coordinates[:,1])
         neuron_df.insert(0, "Ret_x", rec_coordinates[:,0])
         neuron_df.insert(0, "Udist", min_max_scaler.fit_transform(self.build_umatrix().reshape(-1, 1)))    
-        neuron_df.insert(0, "BMU", list(range(1, self.neuron_matrix.shape[0]+1)))
+        neuron_df.insert(0, "Neuron", list(range(1, self.neuron_matrix.shape[0]+1)))
 
-        return neuron_df.astype({"BMU": int,
+        return neuron_df.astype({"Neuron": int,
                               "Ret_x": int,
                               "Ret_y": int,
                               "Cub_x": int,
@@ -549,7 +549,7 @@ class SOM(object):
     @property
     def results_dataframe(self):
         """
-        Function to create a dataframe with the BMU and the associated values to
+        Function to create a dataframe with the neurons and the associated values to
         each input vector.
         """
         # Rescue the neuron dataframe
@@ -566,7 +566,7 @@ class SOM(object):
         results_df.set_index(self._sample_names, inplace=True)
 
         # Regularize the data type
-        return results_df.astype({"BMU": int,
+        return results_df.astype({"Neuron": int,
                                    "Ret_x": int,
                                    "Ret_y": int,
                                    "Cub_x": int,
