@@ -1491,7 +1491,6 @@ class PlotFactory(object):
                      legend_title='Distance',
                      legend_ticks_size=5,
                      legend_title_size=5,
-                     label_title_xy=(0,0.5),
                      xlabel='PC 1',
                      ylabel='PC 2'):
         """
@@ -1524,34 +1523,33 @@ class PlotFactory(object):
         var_pc1, var_pc2 = pca.explained_variance_ratio_
 
         # Plot samples, neurons and its connections
-        f = plt.figure(figsize=figsize, dpi=300)
-        plot_height = int(90*(var_pc1/var_pc2))
-        gs_height = plot_height + 5
-        gs = gridspec.GridSpec(gs_height, 100)
-        ax1 = f.add_subplot(gs[:plot_height, 0:90])
-        ax1.set_aspect('equal')
+        fig, ax = plt.subplots(figsize=figsize)
+
         # Plot samples
         if show_samples:
-            ax1.scatter(
+            scatter_samples = ax.scatter(
                 pca_data[:, 0], pca_data[:, 1],
                 c=samples_color,
                 edgecolors=samples_edgecolor,
                 s=samples_size,
                 marker=samples_marker,
-                zorder=1
-            )
-        # Plot connections
+                zorder=1)
+
+        # Plot connections (load the colormap based on the connections to ensure the range of distances in the colorbar is the same as the U-matrix)
         cmap = mpl.cm.turbo
         connections_dists = np.array(list(connections.values()))
         norm = mpl.colors.Normalize(vmin=np.nanmin(connections_dists), vmax=np.nanmax(connections_dists))
+        sm = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array([])
         if show_connections:
             for (i, j), dist in connections.items():
                 x_values = [pca_neurons[i - 1, 0], pca_neurons[j - 1, 0]]
                 y_values = [pca_neurons[i - 1, 1], pca_neurons[j - 1, 1]]
-                ax1.plot(x_values, y_values, color=cmap(norm(dist)), linewidth=connections_linewidth, zorder=2)
+                ax.plot(x_values, y_values, color=cmap(norm(dist)), linewidth=connections_linewidth, zorder=2)
+
         # Plot neurons
         if show_neurons:
-            ax1.scatter(
+            ax.scatter(
                 pca_neurons[:, 0], pca_neurons[:,1],
                 c=u_dists,
                 cmap=cmap,
@@ -1559,41 +1557,19 @@ class PlotFactory(object):
                 edgecolors=neurons_edgecolor,
                 s=neurons_size,
                 marker=neurons_marker,
-                zorder=3
-            )
+                zorder=3)
         if watermark_neurons:
             for idx, (x, y) in enumerate(pca_neurons):
-                ax1.text(x, y+y_watermark_neurons_text, str(idx + 1), fontsize=watermark_neurons_fontsize, ha='center', va='bottom', color='black')
+                ax.text(x, y+y_watermark_neurons_text, str(idx + 1), fontsize=watermark_neurons_fontsize, ha='center', va='center', color='black')
+
         # Plot parameters
-        ax1.set_xlabel(xlabel)
-        ax1.set_ylabel(ylabel)
-        ax1.set_title(title, fontsize=title_size)
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        ax.set_title(title, fontsize=title_size)
 
-        # Plot legend
-        legend_top = int(0.3*gs_height)
-        legend_bottom = int(0.7*gs_height)
-        ax2 = f.add_subplot(gs[legend_top:legend_bottom, 95:98])
-        cb1 = mpl.colorbar.ColorbarBase(ax2, cmap=cmap, norm=norm, orientation='vertical')
-        cb1.ax.tick_params(labelsize=legend_ticks_size)
-        cb1.set_label(fill(legend_title, 20), 
-                        size=legend_title_size, 
-                        labelpad=20)
-        cb1.ax.yaxis.label.set_position(label_title_xy)
-        """
-        # Move the colorbar a little to the right
-        pos = cb1.ax.get_position()
-        pos.x0 += 0.08 * (pos.x1 - pos.x0)
-        pos.x1 += 0.08 * (pos.x1 - pos.x0)
-        cb1.ax.set_position(pos)
-        
-        cb1.ax.yaxis.label.set_position(label_title_xy)"""
-
-        # ADD WATERMARK
-        # Add white space subplot below the plot
-        # image width is 4 times its height
-        image_width = 4*(gs_height-plot_height)
-        ax3 = f.add_subplot(gs[plot_height:gs_height, 0:image_width], zorder=-1)
-        ax3.imshow(self.foot, aspect='equal', alpha=1)
-        ax3.axis('off')
+        # Plot legend (colorbar)
+        cbar = fig.colorbar(sm, ax=ax)
+        cbar.set_label(legend_title, fontsize=legend_title_size)
+        cbar.ax.tick_params(labelsize=legend_ticks_size)
 
         plt.show()

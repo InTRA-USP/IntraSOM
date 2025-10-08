@@ -958,11 +958,9 @@ class ClusterFactory(object):
                           ylabel='PC 2',
                           title='Samples, Neurons and Centroids',
                           title_size=12,
-                          legend_upper_left_bbox_anchor=(1.02,0.7),
+                          legend_upper_left_bbox_anchor=(1.02,0.8),
                           legend_ncols=1,
-                          sample_fontsize=6,
-                          neuron_fontsize=12,
-                          centroid_fontsize=8,
+                          legend_markersize=10,
                           legend_fontsize=10
                           ):
 
@@ -994,29 +992,25 @@ class ClusterFactory(object):
         var_pc1, var_pc2 = pca.explained_variance_ratio_
 
         # Plot samples, neurons and centroids
-        f = plt.figure(figsize=figsize, dpi=300)
-        plot_height = int(90*(var_pc1/var_pc2))
-        gs_height = plot_height + 5
-        gs = gridspec.GridSpec(gs_height, 100)
-        ax1 = f.add_subplot(gs[:plot_height, 0:90])
-        ax1.set_aspect('equal')
-        # Create colormap
+        fig, ax = plt.subplots(figsize=figsize)
+
+        # Create colormap and norm
         cmap = cm.get_cmap(colormap)
-        norm = mpl.colors.Normalize(vmin=np.nanmin(neurons_labels), vmax=np.nanmax(neurons_labels))
+        cluster_ids = np.unique(neurons_labels) # starting at 1
+        norm = mpl.colors.Normalize(vmin=cluster_ids.min(), vmax=cluster_ids.max())
+
         # Plot samples
         if show_samples:
-            ax1.scatter(
+            ax.scatter(
                 pca_data[:, 0], pca_data[:, 1],
                 c=samples_color,
                 edgecolors=samples_edgecolor,
                 s=samples_size,
                 marker=samples_marker,
-                zorder=1,
-                label='Samples'
-            )
+                zorder=1)
+
         # Plot neurons
-        if show_neurons:
-            ax1.scatter(
+            neurons_scatter = ax.scatter(
                 pca_neurons[:, 0], pca_neurons[:, 1],
                 c=neurons_labels,
                 cmap=cmap,
@@ -1030,10 +1024,11 @@ class ClusterFactory(object):
             )
         if watermark_neurons:
             for idx, (x, y) in enumerate(pca_neurons):
-                ax1.text(x, y+y_watermark_neurons_text, str(idx + 1), fontsize=watermark_neurons_fontsize, ha='center', va='bottom', color='black')
+                ax.text(x, y+y_watermark_neurons_text, str(idx + 1), fontsize=watermark_neurons_fontsize, ha='center', va='center', color='black')
+
         # Plot centroids
         if show_centroids:
-            ax1.scatter(
+            ax.scatter(
                 pca_centroids[:, 0], pca_centroids[:, 1],
                 c=list(range(1,max_clust+1)),
                 cmap=cmap,
@@ -1044,34 +1039,58 @@ class ClusterFactory(object):
                 zorder=3,
                 label='Centroids'
             )
-        # Plot parameters
-        ax1.set_xlabel(xlabel)
-        ax1.set_ylabel(ylabel)
-        ax1.set_title(title, fontsize=title_size)
 
-        # Plot legend
-        custom_legend = []
-        labels = []
+        # First part of the legend: marker handles
+        all_handles = []
+        all_labels = []
+
         if show_samples:
-            samples_handle = mlines.Line2D([], [], color=samples_color, marker=samples_marker, linestyle='None', mec=samples_edgecolor, markersize=sample_fontsize)
-            custom_legend.append(samples_handle)
-            labels.append(samples_legend)
+            sample_marker = mlines.Line2D([], [], color=samples_color, marker=samples_marker, linestyle='None', markersize=legend_markersize, markeredgecolor=samples_edgecolor, label=samples_legend)
+            all_handles.append(sample_marker)
+            all_labels.append(samples_legend)
+
         if show_neurons:
-            for clust_idx in range(1,max_clust+1):
-                neuron_cluster_handle = mlines.Line2D([], [], color=cmap(norm(clust_idx)), alpha=alpha_neurons, marker=neurons_marker, linestyle='None', mec=cmap(norm(clust_idx)), markersize=neuron_fontsize)
-                centroid_cluster_handle = mlines.Line2D([], [], color=cmap(norm(clust_idx)), marker=centroids_marker, linestyle='None', mec=centroids_edgecolor, markersize=centroid_fontsize)
-                custom_legend.append((neuron_cluster_handle, centroid_cluster_handle))
-                labels.append(f'{clusters_legend} {clust_idx}')
+            neuron_marker = mlines.Line2D([], [], color='gray', marker=neurons_marker, linestyle='None', markersize=legend_markersize, markeredgecolor='k', label='Neurons')
+            all_handles.append(neuron_marker)
+            all_labels.append('Neurons')
 
-        ax1.legend(handles=custom_legend, labels=labels, handler_map={tuple: HandlerTuple(ndivide=None)}, loc='upper left', bbox_to_anchor=legend_upper_left_bbox_anchor, ncols=legend_ncols, fontsize=legend_fontsize)
+        if show_centroids:
+            centroid_marker = mlines.Line2D([], [], color='gray', marker=centroids_marker, linestyle='None', markersize=legend_markersize, markeredgecolor='k', label='Centroids')
+            all_handles.append(centroid_marker)
+            all_labels.append('Centroids')
 
-        # ADD WATERMARK
-        # Add white space subplot below the plot
-        # image width is 4 times its height
-        image_width = 4*(gs_height-plot_height)
-        ax2 = f.add_subplot(gs[plot_height:gs_height, 0:image_width], zorder=-1)
-        ax2.imshow(self.foot, aspect='equal', alpha=1)
-        ax2.axis('off')
+        # Second part of the legend: cluster colors and ID
+        if all_handles:
+            all_handles.append(mlines.Line2D([], [], color='white', linestyle='None', label='')) # blank space separating the first to second part
+            all_labels.append('')
+
+        for cluster_id in cluster_ids:
+            color = cmap(norm(cluster_id))
+            cluster_handle = mlines.Line2D([], [], 
+                                        color=color, 
+                                        marker='s',
+                                        linestyle='None', 
+                                        markersize=8, 
+                                        markeredgecolor='k')
+            all_handles.append(cluster_handle)
+            all_labels.append(f'{clusters_legend} #{int(cluster_id)}')
+
+
+        # Plot the legend
+        legend = ax.legend(
+            all_handles, 
+            all_labels, 
+            title='', 
+            loc='upper left', 
+            bbox_to_anchor=legend_upper_left_bbox_anchor,
+            ncol=legend_ncols
+        )
+        legend.get_title().set_fontsize(legend_fontsize)
+
+        # Plot parameters
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        ax.set_title(title, fontsize=title_size)
 
         plt.show()
 

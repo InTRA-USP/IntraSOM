@@ -407,7 +407,7 @@ class Evaluation(object):
                 ax=ax
             )
 
-            # Get the handles/labels from the scatterplot of new samples
+            # Get the handles/labels from the scatterplot of new samples (markers)
             handles_color, labels_color = scatter_new.get_legend_handles_labels()
             legend1 = ax.legend(
                 handles_color, labels_color,
@@ -437,6 +437,7 @@ class Evaluation(object):
             )
 
             ax.legend(handles=[og_marker, new_marker], title='', loc='upper center', bbox_to_anchor=(0.5, -0.12), ncol=2)
+
             # Adjust the plot to make room for the legend
             plt.subplots_adjust(bottom=0.2)
             plt.xlabel('PC1')
