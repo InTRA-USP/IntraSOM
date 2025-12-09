@@ -55,7 +55,7 @@ class ClusterRepresentativity(object):
         self._neurons = cluster_object.som_object.codebook.matrix
         self._clusters_centroids = cluster_object._clusters_centroids
 
-        # Assignments and number of hits
+        # Assignments and number of hits of each neuron
         self.samples_bmu = cluster_object.som_object.results_dataframe['Neuron'] # pandas series, the index is added by 1
         self._neurons_labels = cluster_object._neurons_labels # neurons clusters labels (ranging from 1 to n_clusters)
         self._samples_labels = cluster_object._samples_labels # samples clusters labels (ranging from 0 to n_clusters-1)
@@ -65,6 +65,115 @@ class ClusterRepresentativity(object):
         self.mapsize = cluster_object.mapsize # (n_columns, n_rows)
         image_file = resources.files('intrasom').joinpath('images/foot.jpg')
         self.foot = Image.open(image_file)
+
+    def calculate_neurons_centroids_dists(self):
+        """
+        This function calculates the euclidean distances (norm) between each neuron and each cluster centroid.
+
+        Returns:
+            np.ndarray: distances array of shape (n_neurons, n_clusters), with distances between each neuron and each cluster centroid.
+        """
+
+        neurons_centroids_dists = np.linalg.norm(self._neurons[:, np.newaxis, :] - self._clusters_centroids, axis=2)
+        return neurons_centroids_dists
+
+    def similarity_metric(self,
+                          sim_type: str = 'min-max',
+                          epsilon: float = 1e-10,
+                          alpha: float = 1.0):
+        """
+        This function calculates the similarity metric between each neuron and each cluster centroid based on neurons-centroids distances.
+
+        Args:
+            sim_type (str): similarity metric type. Options are:
+                - 'min-max': Min-Max normalization of distances to get similarities between 0 and 1.
+                - 'negative-exp': Negative exponential transformation of distances to get similarities between 0 and 1.
+            epsilon (float): when calculating the Min-Max similarities, sum this factor to avoid division by 0.
+            alpha (float): scaling factor used in the negative exponential transformation. Larger values of alpha result in a steeper decay of similarity with distance.
+
+        Returns:
+            np.ndarray: similarities array of shape (n_neurons, n_clusters), with similarities between each neuron and each cluster centroid.
+        """
+
+        self.sim_type = sim_type
+        neurons_dists = self.calculate_neurons_centroids_dists()
+        self.neurons_dists = neurons_dists
+        if sim_type == 'min-max':
+            # Normalize the distances to get similarities between 0 and 1
+            nd_min = np.min(neurons_dists, axis=1, keepdims=True)
+            nd_max = np.max(neurons_dists, axis=1, keepdims=True)
+            neurons_similarities = 1 - (neurons_dists - nd_min) / (nd_max - nd_min + epsilon)
+
+        elif sim_type == 'negative-exp':
+            neurons_similarities = np.exp(-alpha*neurons_dists)
+
+        else:
+            print('Similarity metric not implemented.')
+
+        self.neurons_similarities = neurons_similarities
+
+    def plot_similarity_curves(self,
+                               plot_for_clusters: list = [],
+                               cmap: str = 'gist_rainbow',):
+        """
+        This function plots the similarity curves between neurons and centroids for the specified clusters.
+
+        Args:
+            plot_for_clusters (list): list of cluster indices to plot the similarity curves for.
+            cmap (str): colormap used for plotting the similarity curves for each cluster.
+        """
+
+        # Pick the colors from matplotlib colormap gist_rainbow for each cluster
+        colors = plt.get_cmap(cmap)(np.linspace(0, 1, self.neurons_similarities.shape[1]))
+        fig, ax = plt.subplots(figsize=(10,6))
+        for cluster_id in range(self.neurons_similarities.shape[1]):
+            if cluster_id in plot_for_clusters:
+                ax.scatter(
+                    self.neurons_dists[:, cluster_id],
+                    self.neurons_similarities[:, cluster_id],
+                    label=f'Neurons - Cluster {cluster_id+1}',
+                    marker='h',
+                    color=colors[cluster_id],
+                    alpha=0.5,
+                    edgecolor=colors[cluster_id],
+                    s=180)
+                # Now plot the index of the neuron above each marker
+                for i in range(self.neurons_similarities.shape[0]):
+                    ax.text(
+                        self.neurons_dists[i, cluster_id],
+                        self.neurons_similarities[i, cluster_id],
+                        str(i+1),
+                        fontsize=8,
+                        ha='center',
+                        va='center'
+                    )
+        ax.set_title('Neurons Distance-Similarity to Centroids Curves')
+        ax.set_xlabel('Neuron-centroid euclidean distance (normalized data space)')
+        if self.sim_type == 'min-max':
+            ax.set_ylabel('Min-Max similarity')
+        elif self.sim_type == 'negative-exp':
+            ax.set_ylabel('Negative exponential similarity')
+        ax.legend()
+        plt.show()
+
+    def calculate_neurons_cmpf(self, rounded: bool = False, decimals: int = 3):
+
+        """
+        This function returns a dataframe of shape "number of neurons x number of clusters" in which each cell contains the Cluster Membership Probability Function (CMPF) values.
+
+        The CMPF is a function that uses the parameters of the SOM and K-Means clustering framework to calculate the degree to which each neuron, more specifically which BMU, is associated to a given cluster.
+
+        To calculate the CMPF, the similarity between neurons and centroids (sim(i,k)) is weighted by the number of hits of each neuron (n(i)) divided by the total number of samples in the dataset (S): sim(i,k) * (n(i)/S).
+
+        Then, CMPF values are normalized across clusters for each neuron, such that for each BMU, the probabilities sum up to 1.0. In this way, neurons with no hits are assigned a CMPF value of 0.0.
+
+        Args:
+            rounded (bool): returns the rounded CMPF values.
+            decimals (int): decimals used for rounding the CMPF values.
+
+        Returns:
+            np.ndarray: CMPF array of shape (n_neurons, n_clusters), with cluster membership probabilities for each neuron.
+        """
 
     def calculate_neurons_cmpf(self,
                                similarity: str = 'min-max',
@@ -146,6 +255,29 @@ class ClusterRepresentativity(object):
         self.clusters_weights = clusters_weights
 
         return np.round(cmpf, decimals=decimals) if rounded else cmpf
+
+    def plot_perc_overlap(self):
+        """
+        Plots a heatmap of normalized overlap between all cluster pairs.
+        neurons_responsibilities: numpy array or DataFrame of shape (n_neurons, n_clusters)
+        """
+
+        n_clusters = self.cmpf.shape[1]
+        overlap_matrix = np.zeros((n_clusters, n_clusters))
+        for i in range(n_clusters):
+            for j in range(n_clusters):
+                if i != j:
+                    overlap = np.sum(np.minimum(self.cmpf[:, i], self.cmpf[:, j]))
+                    min_sum = np.minimum(np.sum(self.cmpf[:, i]), np.sum(self.cmpf[:, j]))
+                    overlap_matrix[i, j] = overlap / min_sum if min_sum > 0 else 0.0
+        # Labeling
+        labels = [f"Cluster {i+1}" for i in range(n_clusters)]
+        # Plot
+        plt.figure(figsize=(6, 5))
+        ax = sns.heatmap(overlap_matrix, annot=True, cmap='Blues', xticklabels=labels, yticklabels=labels)
+        plt.title('Normalized Overlap Between Clusters')
+        plt.tight_layout()
+        plt.show()
 
     def cmpf_jitter_plot(self,
                         plot_height: int = 6,
