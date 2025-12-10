@@ -6,6 +6,7 @@ from matplotlib import cm
 from matplotlib.patches import RegularPolygon
 import matplotlib.lines as mlines
 from matplotlib.legend_handler import HandlerTuple
+import seaborn as sns
 from shapely.geometry import Polygon, Point
 from shapely.ops import unary_union
 import geopandas as gpd
@@ -61,6 +62,10 @@ class ClusterRepresentativity(object):
         self._samples_labels = cluster_object._samples_labels # samples clusters labels (ranging from 0 to n_clusters-1)
         self.bmu_hits = cluster_object.som_object.results_dataframe['Neuron'].value_counts() # pandas series, the index is added by 1
 
+        # Store neurons and samples representativeness scores
+        self.neurons_scores = pd.DataFrame(index=np.arange(1, self._neurons.shape[0]+1))
+        self.samples_scores = pd.DataFrame(index=cluster_object.sample_names)
+
         # For plotting
         self.mapsize = cluster_object.mapsize # (n_columns, n_rows)
         image_file = resources.files('intrasom').joinpath('images/foot.jpg')
@@ -75,12 +80,23 @@ class ClusterRepresentativity(object):
         """
 
         neurons_centroids_dists = np.linalg.norm(self._neurons[:, np.newaxis, :] - self._clusters_centroids, axis=2)
+
+        # Populate the neurons_scores dataframe with the distances
+        cluster_cols = [f'Cluster_{i+1}' for i in range(self._clusters_centroids.shape[0])]
+        self.cluster_cols = cluster_cols
+        neurons_centroids_dists_df = pd.DataFrame(
+            data=neurons_centroids_dists,
+            index=np.arange(1, self._neurons.shape[0]+1),
+            columns=pd.MultiIndex.from_product([["Centroids_dists"],cluster_cols])
+        )
+        self.neurons_scores = pd.concat([self.neurons_scores, neurons_centroids_dists_df], axis=1)
+
         return neurons_centroids_dists
 
-    def similarity_metric(self,
-                          sim_type: str = 'min-max',
-                          epsilon: float = 1e-10,
-                          alpha: float = 1.0):
+    def calculate_neurons_similarities(self,
+                                       sim_type: str = 'min-max',
+                                       epsilon: float = 1e-10,
+                                       alpha: float = 1.0):
         """
         This function calculates the similarity metric between each neuron and each cluster centroid based on neurons-centroids distances.
 
@@ -103,14 +119,24 @@ class ClusterRepresentativity(object):
             nd_min = np.min(neurons_dists, axis=1, keepdims=True)
             nd_max = np.max(neurons_dists, axis=1, keepdims=True)
             neurons_similarities = 1 - (neurons_dists - nd_min) / (nd_max - nd_min + epsilon)
-
         elif sim_type == 'negative-exp':
             neurons_similarities = np.exp(-alpha*neurons_dists)
-
         else:
             print('Similarity metric not implemented.')
 
         self.neurons_similarities = neurons_similarities
+
+        # Populate the neurons_scores dataframe with the similarities
+        if sim_type == 'min-max':
+            score_type = ["Min_max_sims"]
+        elif sim_type == 'negative-exp':
+            score_type = ["Negative_exp_sims"]
+        neurons_similarities_df = pd.DataFrame(
+            data=neurons_similarities,
+            index=np.arange(1, self._neurons.shape[0]+1),
+            columns=pd.MultiIndex.from_product([score_type, self.cluster_cols])
+        )
+        self.neurons_scores = pd.concat([self.neurons_scores, neurons_similarities_df], axis=1)
 
     def plot_similarity_curves(self,
                                plot_for_clusters: list = [],
@@ -122,6 +148,10 @@ class ClusterRepresentativity(object):
             plot_for_clusters (list): list of cluster indices to plot the similarity curves for.
             cmap (str): colormap used for plotting the similarity curves for each cluster.
         """
+
+        # Automatically calculate similarity values using default parameters if not already calculated
+        if not hasattr(self, 'neurons_similarities'):
+            self.calculate_neurons_similarities()
 
         # Pick the colors from matplotlib colormap gist_rainbow for each cluster
         colors = plt.get_cmap(cmap)(np.linspace(0, 1, self.neurons_similarities.shape[1]))
@@ -156,7 +186,10 @@ class ClusterRepresentativity(object):
         ax.legend()
         plt.show()
 
-    def calculate_neurons_cmpf(self, rounded: bool = False, decimals: int = 3):
+    def calculate_neurons_cmpf(self,
+                               sim_type: str = 'min-max',
+                               rounded: bool = False,
+                               decimals: int = 3):
 
         """
         This function returns a dataframe of shape "number of neurons x number of clusters" in which each cell contains the Cluster Membership Probability Function (CMPF) values.
@@ -175,45 +208,9 @@ class ClusterRepresentativity(object):
             np.ndarray: CMPF array of shape (n_neurons, n_clusters), with cluster membership probabilities for each neuron.
         """
 
-    def calculate_neurons_cmpf(self,
-                               similarity: str = 'min-max',
-                               epsilon: float = 1e-10,
-                               rounded: bool = False,
-                               decimals: int = 3):
-        """
-        This function returns a dataframe of shape "number of neurons x number of clusters" in which each cell contains the Cluster Membership Probability Function (CMPF) values.
-
-        The CMPF is a function that uses the parameters of the SOM and K-Means clustering framework to calculate the degree to which each neuron, more specifically which BMU, is associated to a given cluster.
-
-        To calculate the CMPF, a similarity metric between neurons and centroids (sim(i,k)) is weighted by the number of hits of each neuron (n(i)) divided by the total number of samples in the dataset (S): sim(i,k) * (n(i)/S).
-
-        Then, CMPF values are normalized across clusters for each neuron, such that for each BMU, the probabilities sum up to 1.0. In this way, neurons with no hits are assigned a CMPF value of 0.0.
-
-        Args:
-            similarity (str): similarity metric used to transform the distances between neurons and centroids into similarities.
-            epsilon (float): when calculating the Min-Max similarities, sum this factor to avoid division by 0.
-            rounded (bool): returns the rounded CMPF values.
-            decimals (int): decimals used for rounding the CMPF values.
-
-        Sets:
-            neurons_similarities (np.ndarray): the similarity of each neuron in respect to each cluster (n_neurons, n_clusters).
-            cluster_representatives_indices (np.ndarray): the indices of the neurons with maximum CMPF value of each cluster (n_clusters).
-            clusters_weights (np.ndarray): the weights of each cluster calculated by normalizing the means of the neurons CMPF values. These weights are probabilities that represent the ordering of representativity of each cluster and their sum for all clusters is equal to 1.0.
-
-        Returns:
-            np.ndarray: CMPF array of shape (n_neurons, n_clusters), with cluster membership probabilities for each neuron.
-        """
-
-        if similarity == 'min-max':
-            # Calculate the neurons similarities to the centroids by normalizing across the rows
-            # neurons_similarities is of shape (n_neurons, n_clusters)
-            neurons_dists = np.linalg.norm(self._neurons[:, np.newaxis, :] - self._clusters_centroids, axis=2)
-            nd_min = np.min(neurons_dists, axis=1, keepdims=True)
-            nd_max = np.max(neurons_dists, axis=1, keepdims=True)
-            neurons_similarities = 1 - (neurons_dists - nd_min) / (nd_max - nd_min + epsilon)
-            self.neurons_similarities = neurons_similarities
-        else:
-            print('Similarity metric not implemented.')
+        # Automatically calculate similarity values using default parameters if not already calculated
+        if not hasattr(self, 'neurons_similarities'):
+            self.calculate_neurons_similarities(sim_type=sim_type)
 
         # Weight the similarities by the (number of hits)/(number of samples)
         # bmu_hits is of shape (n_bmu)
@@ -225,7 +222,7 @@ class ClusterRepresentativity(object):
         neurons_hits = np.zeros(n_neurons, dtype=int)
         neurons_hits[bmu_hits.index - 1] = bmu_hits.values
         hits_weighting_factor = neurons_hits/n_samples
-        unnorm_cmpf = neurons_similarities * hits_weighting_factor[:, np.newaxis] # (n_neurons) > (n_neurons,)
+        unnorm_cmpf = self.neurons_similarities * hits_weighting_factor[:, np.newaxis] # (n_neurons) > (n_neurons,)
 
         # Normalize the CMPF values to get the responsibilities for each neuron (ranging from 0.0 to 1.0)
         # row_sums is of shape (n_neurons)
@@ -235,26 +232,40 @@ class ClusterRepresentativity(object):
         cmpf = unnorm_cmpf / row_sums
         self.cmpf = cmpf
 
-        # For instance, it is useful to get:
-        # 1. The weight of each cluster considering the mean of the CMPF values
-        # 2. The cluster representative or "typical neuron" with the maximum CMPF value to the cluster;
-        # cluster_representatives_indices and clusters_weights are of shape (n_clusters)
-        cluster_representatives_indices = np.argmax(cmpf, axis=0)
-        clusters_weights = np.mean(cmpf, axis=0)
-        clusters_weights /= clusters_weights.sum()
+        # Populate the neurons_scores dataframe with the CMPF values
+        cmpf_df = pd.DataFrame(
+            data=cmpf,
+            index=np.arange(1, self._neurons.shape[0]+1),
+            columns=pd.MultiIndex.from_product([["CMPF"],self.cluster_cols])
+        )
+        self.neurons_scores = pd.concat([self.neurons_scores, cmpf_df], axis=1)
 
-        # Get the clusters ordering through the mean CMPF values (clusters_weights)
-        cluster_weights_sorted_indices = np.argsort(-clusters_weights) # the order of indices of the cluster_weights from largest to smallest
-        clusters_order = np.zeros_like(clusters_weights, dtype=int)
-        for rank_num, original_idx in enumerate(cluster_weights_sorted_indices):
-            clusters_order[original_idx] = rank_num + 1
-        self.clusters_order = clusters_order
+        # SEPARATE FUNCTIONS TO CALCULATE CLUSTER WEIGHTS
 
-        # Representatives indices starting at 1
-        self.cluster_representatives_indices = cluster_representatives_indices+1
-        self.clusters_weights = clusters_weights
+        # ALSO, CREATE A TABLE FOR EACH SAMPLE AND THE COLUMNS MUST BE THESE PARAMETERS (SCORES AS I WASD DOING BEFORE, LIKE THE SILHOUETTE SCORE AND DISTANCE OF EACH SAMPLE TO ITS REP NEURON)
 
-        return np.round(cmpf, decimals=decimals) if rounded else cmpf
+        # FINALLY, MAKE THE MAP PLOT OF THE CMPF, SIMILARITY AND DISTANCES OF THE NEURONS TO CENTROIDS AND PUT THE LABEL OF THE REP SAMPLE IN THERE
+
+        # # For instance, it is useful to get:
+        # # 1. The weight of each cluster considering the mean of the CMPF values
+        # # 2. The cluster representative or "typical neuron" with the maximum CMPF value to the cluster;
+        # # cluster_representatives_indices and clusters_weights are of shape (n_clusters)
+        # cluster_representatives_indices = np.argmax(cmpf, axis=0)
+        # clusters_weights = np.mean(cmpf, axis=0)
+        # clusters_weights /= clusters_weights.sum()
+
+        # # Get the clusters ordering through the mean CMPF values (clusters_weights)
+        # cluster_weights_sorted_indices = np.argsort(-clusters_weights) # the order of indices of the cluster_weights from largest to smallest
+        # clusters_order = np.zeros_like(clusters_weights, dtype=int)
+        # for rank_num, original_idx in enumerate(cluster_weights_sorted_indices):
+        #     clusters_order[original_idx] = rank_num + 1
+        # self.clusters_order = clusters_order
+
+        # # Representatives indices starting at 1
+        # self.cluster_representatives_indices = cluster_representatives_indices+1
+        # self.clusters_weights = clusters_weights
+
+        # return np.round(cmpf, decimals=decimals) if rounded else cmpf
 
     def plot_perc_overlap(self):
         """
