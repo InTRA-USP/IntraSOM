@@ -240,28 +240,207 @@ class ClusterRepresentativity(object):
         )
         self.neurons_scores = pd.concat([self.neurons_scores, cmpf_df], axis=1)
 
-        # SEPARATE FUNCTIONS TO ESTIMATE CLUSTER WEIGHTS
+        # SEPARATE THE FOLLOWING FUNCTIONS (TO ESTIMATE CLUSTER WEIGHTS, ETC)
 
-        # # For instance, it is useful to get:
-        # # 1. The weight of each cluster considering the mean of the CMPF values
-        # # 2. The cluster representative or "typical neuron" with the maximum CMPF value to the cluster;
-        # # cluster_representatives_indices and clusters_weights are of shape (n_clusters)
-        # cluster_representatives_indices = np.argmax(cmpf, axis=0)
-        # clusters_weights = np.mean(cmpf, axis=0)
-        # clusters_weights /= clusters_weights.sum()
+        # For instance, it is useful to get:
+        # 1. The weight of each cluster considering the mean of the CMPF values
+        # 2. The cluster representative or "typical neuron" with the maximum CMPF value to the cluster;
+        # cluster_representatives_indices and clusters_weights are of shape (n_clusters)
+        cluster_representatives_indices = np.argmax(cmpf, axis=0)
+        clusters_weights = np.mean(cmpf, axis=0)
+        clusters_weights /= clusters_weights.sum()
 
-        # # Get the clusters ordering through the mean CMPF values (clusters_weights)
-        # cluster_weights_sorted_indices = np.argsort(-clusters_weights) # the order of indices of the cluster_weights from largest to smallest
-        # clusters_order = np.zeros_like(clusters_weights, dtype=int)
-        # for rank_num, original_idx in enumerate(cluster_weights_sorted_indices):
-        #     clusters_order[original_idx] = rank_num + 1
-        # self.clusters_order = clusters_order
+        # Get the clusters ordering through the mean CMPF values (clusters_weights)
+        cluster_weights_sorted_indices = np.argsort(-clusters_weights) # the order of indices of the cluster_weights from largest to smallest
+        clusters_order = np.zeros_like(clusters_weights, dtype=int)
+        for rank_num, original_idx in enumerate(cluster_weights_sorted_indices):
+            clusters_order[original_idx] = rank_num + 1
+        self.clusters_order = clusters_order
 
-        # # Representatives indices starting at 1
-        # self.cluster_representatives_indices = cluster_representatives_indices+1
-        # self.clusters_weights = clusters_weights
+        # Representatives indices starting at 1
+        self.cluster_representatives_indices = cluster_representatives_indices+1
+        self.clusters_weights = clusters_weights
 
         # return np.round(cmpf, decimals=decimals) if rounded else cmpf
+
+    def cmpf_jitter_plot(self,
+                        plot_height: int = 6,
+                        plot_width: float = 12,
+                        colormap: str = "gist_rainbow",
+                        neurons_max_size: float = 120,
+                        alpha_neuron_legend: float = 0.7,
+                        watermark_neurons: bool = True,
+                        y_watermark_neurons_text: float = 0,
+                        watermark_neurons_fontsize: float = 5,
+                        title: str = "Jittering strip plot with CMPF values per cluster and means",
+                        title_size: float = 12,
+                        xlabel_size: float = 10,
+                        ylabel_size: float = 10,
+                        xlabel: str ="Cluster",
+                        ylabel: str ="CMPF values",
+                        clusters_highlight: list = [],
+                        yrange: list = [0.0,1.0],
+                        legend_title: str = "Clusters weights\nranking (mean CMPF)",
+                        custom_labels: list = [],
+                        legend_loc: str = "center",
+                        legend_title_size: float = 8,
+                        legend_text_size: float = 6,
+                        num_hexa_dist_factor: float = 0.015,
+                        hexa_label_dist_factor: float = 0.025):
+
+        """
+        For visualization of the distributions of CMPF values for each neuron. For visualizing the distributions of the maximum CMPF values for each neuron in the SOM latent space, use "cmpf_som_plot".
+        """
+
+        try:
+            cmpf = self.cmpf
+        except:
+            self.calculate_neurons_cmpf() # calculate the CMPF
+            cmpf = self.cmpf
+
+        n_clusters = cmpf.shape[1]
+
+        # Plot CMPF values to check ties on each cluster
+        f = plt.figure(figsize=(plot_width, plot_height), dpi=300)
+        gs_height = plot_height*10
+        gs_width = plot_width*10
+        gs = gridspec.GridSpec(gs_height, gs_width)
+        if n_clusters <=10:
+            ax1 = f.add_subplot(gs[:int(0.90*gs_height), 0:int(0.89*gs_width)])
+        elif n_clusters <=20:
+            ax1 = f.add_subplot(gs[:int(0.90*gs_height), 0:int(0.79*gs_width)])
+        elif n_clusters <=30:
+            ax1 = f.add_subplot(gs[:int(0.90*gs_height), 0:int(0.69*gs_width)])
+        else:
+            ax1 = f.add_subplot(gs[:int(0.90*gs_height), 0:int(0.59*gs_width)])
+
+        # Jittering strip plot
+        if clusters_highlight == []:
+            clusters_indices = np.arange(n_clusters)
+        else:
+            clusters_indices = np.array(clusters_highlight) - 1
+        cmap = plt.get_cmap(colormap)
+        colors = cmap(np.linspace(0, 1, cmpf.shape[1]))
+        for i, cluster_label in enumerate(clusters_indices):
+            # Plot the neurons
+            y = cmpf[:, cluster_label]
+            x = np.random.normal(i + 1, 0.08, size=len(y))
+            # Plot the mean line of each cluster
+            mean_y = np.mean(y[y > 0])  # ignore neurons with CMPF = 0
+            ax1.hlines(mean_y, i + 0.7, i + 1.3, colors=colors[cluster_label], linestyles='dashed', linewidth=2, zorder=2)
+            # Plot the neurons
+            ax1.scatter(x, y, color=colors[cluster_label], marker='h', alpha=y, edgecolor=colors[cluster_label], s=neurons_max_size*y, zorder=3)
+            if watermark_neurons:
+                for xi, yi, neuron_idx in zip(x, y, range(1, len(y)+1)):
+                    y_text = yi + y_watermark_neurons_text
+                    if yi > mean_y and (yrange[0] <= y_text <= yrange[1]):  # only show for neurons above the mean line and inside the y range
+                        ax1.text(xi, yi + y_watermark_neurons_text, str(neuron_idx),
+                                fontsize=watermark_neurons_fontsize,
+                                ha='center', va='center', color='black')
+
+        ax1.set_ylim(yrange)
+        ax1.set_xticks(np.arange(1, len(clusters_indices) + 1))
+        ax1.set_xticklabels([f'#{i+1}' for i in clusters_indices])
+        ax1.set_xlabel(xlabel, fontsize=xlabel_size)
+        ax1.set_ylabel(ylabel, fontsize=ylabel_size)
+        ax1.grid(True, linestyle='--', alpha=0.7)
+        ax1.set_title(title, fontsize=title_size)
+
+        # Plot legend
+        legend_top = int(0.3*gs_height)
+        legend_bottom = int(0.7*gs_height)
+        if n_clusters <=10:
+            ax2 = f.add_subplot(gs[legend_top:legend_bottom, int(0.90*gs_width):])
+        elif n_clusters<=20:
+            ax2 = f.add_subplot(gs[legend_top:legend_bottom, int(0.80*gs_width):])
+        elif n_clusters<=30:
+            ax2 = f.add_subplot(gs[legend_top:legend_bottom, int(0.70*gs_width):])
+        else:
+            ax2 = f.add_subplot(gs[legend_top:legend_bottom, int(0.60*gs_width):])
+        ax2.invert_yaxis()
+        ax2.set_aspect('equal')
+
+        # Legend layout parameters
+        n_cols = int(np.ceil(n_clusters/10))
+        n_rows = int(np.ceil(n_clusters / n_cols))
+        hex_height = 0.096
+        pad = (0.1-hex_height)
+        radius =  hex_height/2
+        total_height = hex_height * n_rows + n_rows * pad
+        shift = hex_height
+        y_start = ((1 - total_height) / 2)+shift/2
+        x_start = pad+shift/2
+        text_pad = hex_height*3
+
+        # Fill legend layout
+        clusters_order = self.clusters_order
+        for i, (xfac, yfac) in enumerate(np.ndindex((n_cols, n_rows))):
+            x_center = x_start+(xfac)*shift+xfac*pad+xfac*text_pad
+            y_center = y_start+(yfac)*shift+yfac*pad
+            ax2.annotate(f'{i+1}.',
+                xy=(x_center, y_center),
+                xytext=(0, 0),
+                textcoords="offset points",
+                color='black',
+                weight='bold',
+                fontsize=legend_text_size,
+                ha='left',
+                va='center')
+
+            clust_idx = np.where(clusters_order == i+1)[0][0]
+            hex_points = RegularPolygon((x_center+radius+num_hexa_dist_factor*legend_text_size, y_center), 
+                numVertices=6, 
+                radius=radius-radius*0.05,
+                facecolor=colors[clust_idx],
+                fill = True,
+                alpha=alpha_neuron_legend,
+                edgecolor=colors[clust_idx],
+                linewidth=2)
+            ax2.add_patch(hex_points)
+
+            if custom_labels != []:
+                ax2.annotate(custom_labels[clust_idx],
+                    xy=(x_center+1.2*radius+hexa_label_dist_factor*legend_text_size, y_center),
+                    xytext=(0, 0),
+                    textcoords="offset points",
+                    color='black',
+                    weight='bold',
+                    fontsize=legend_text_size,
+                    ha='left',
+                    va='center')
+            else:
+                ax2.annotate(f'Cluster #{clust_idx+1}',
+                    xy=(x_center+1.2*radius+hexa_label_dist_factor*legend_text_size, y_center),
+                    xytext=(0, 0),
+                    textcoords="offset points",
+                    color='black',
+                    weight='bold',
+                    fontsize=legend_text_size,
+                    ha='left',
+                    va='center')
+
+        ax2.set_title(legend_title, 
+                      fontdict={"fontsize": legend_title_size},
+                      loc=legend_loc, 
+                      pad=5,
+                      fontweight='bold',
+                      y=1-y_start+0.03)
+        
+        ax2.set_xlim(0, n_cols*hex_height+n_cols*pad+n_cols*text_pad)
+        ax2.set_ylim(1, -0.01)
+        
+        ax2.set_axis_off()
+
+        # Add watermark
+        # Add white space subplot below the plot
+        image_width = 4*(gs_height-int(0.95*gs_height))
+        ax3 = f.add_subplot(gs[int(0.95*gs_height):gs_height, 0:image_width], zorder=-1)
+
+        # Add the watermark image to the white space subplot
+        ax3.imshow(self.foot, aspect='equal', alpha=1)
+        ax3.axis('off')
+
+        plt.show()
 
     def rep_som_plot(self,
                      rep_measure: str = 'cmpf', # 'cmpf' or 'sims' or 'dists'
@@ -273,25 +452,43 @@ class ClusterRepresentativity(object):
                      neurons_highlight: list = [], # this list contains the indices of the neurons that will be highlighted in the map
                      clusters_highlight: list = [], # this list contains the indices of the cluster should be highlighted in the outline
                      samples_label: list = [], # this list contains the indices of the neurons whose typical sample will be shown
+                     samples_label_fontsize: float = 10,
                      alfa_clust_legend: float = 0.5,
-                     legend_title: bool = False,
+                     legend_title: str = None,
                      legend_title_size: float = 12,
                      legend_text_size: float = 10,
                      title: str = "Representativity Values of Neurons",
                      title_size: float = 25,
-                     title_pad: float = 40,
+                     legend_pad: float = 10,
                      custom_labels: list = [],
-                     cluster_outline: bool = True,
-                     neuron_number_label: str = "Neuron Number",
-                     selected_neuron_label: str = "Selected Neurons"):
+                     cluster_outline: bool = True):
         """
         Plots a SOM graph showing a representativity measure (CMPF, similarity or distance) of each neuron for a given cluster. Also, highlights neurons and clusters of interest (neurons_highlight and clusters_highlight). It can also display the representative or typical sample of a given neuron (samples_label).
         """
 
+        def search_strings(search_list, target_list):
+            found_index = None
+            found_string = None
+
+            for search_string in search_list:
+                for index, target_string in enumerate(target_list):
+                    if search_string == target_string:
+                        if found_index is None or index < found_index:
+                            found_index = index
+                            found_string = search_string
+                        break
+
+            return found_string, found_index
+
         if not hasattr(self, 'cmpf'):
             self.calculate_neurons_cmpf() # calculate the CMPF
 
-        metric_map = {"dists": "Centroids_dists", "sims":  "Min_max_sims", "cmpf":  "CMPF"}
+        # Create a metric map, if the user input is "sims", it must detect which similarity type was used
+        metric_map = {
+            "cmpf": "CMPF",
+            "sims":  "Min_max_sims" if self.sim_type=='min-max' else "Negative_exp_sims",
+            "dists": "Centroids_dists"
+            }
 
         if rep_measure not in metric_map:
                 raise ValueError(f"Invalid metric '{rep_measure}'. Must be one of {list(metric_map.keys())}")
@@ -306,7 +503,7 @@ class ClusterRepresentativity(object):
         plot_height = int(90*(self.mapsize[1]/self.mapsize[0]))
         gs_height = plot_height + 5
         gs = gridspec.GridSpec(gs_height, 100)
-        ax = f.add_subplot(gs[:plot_height, :80]) # (80? the other 20 is for the colorbar?)
+        ax = f.add_subplot(gs[:plot_height, :95])
         ax.set_aspect('equal')
 
         xx = np.reshape(self.generate_hex_lattice(self.mapsize[0], self.mapsize[1])[:,0], (self.mapsize[1], self.mapsize[0]))
@@ -318,19 +515,19 @@ class ClusterRepresentativity(object):
         cluster_color = cmap(normalized)
 
         # Create the map
-        clusters = rep_values_norm.reshape(self.mapsize[1], self.mapsize[0])
-        for j in range(clusters.shape[0]):
-            for i in range(clusters.shape[1]):
+        cluster_cmpf = rep_values_norm.reshape(self.mapsize[1], self.mapsize[0])
+        for j in range(cluster_cmpf.shape[0]):
+            for i in range(cluster_cmpf.shape[1]):
                 nnodes = self.mapsize[0] * self.mapsize[1]
                 grid_neurons = np.linspace(1,nnodes, nnodes).reshape(self.mapsize[1], self.mapsize[0])
                 hexagon = RegularPolygon(
                     (xx[(j, i)]*2, yy[(j,i)]*2), 
                     numVertices=6, 
-                    radius=(2/np.sqrt(3)-0.04*(2/np.sqrt(3)))*clusters[j][i],
+                    radius=(2/np.sqrt(3)-0.04*(2/np.sqrt(3)))*cluster_cmpf[j][i],
                     facecolor = cluster_color,
                     edgecolor="black" if grid_neurons[j,i] in neurons_highlight else None,
                     linewidth=2 if grid_neurons[j,i] in neurons_highlight else 0, 
-                    alpha = clusters[j][i], 
+                    alpha = cluster_cmpf[j][i], 
                     zorder=1)
                 ax.add_patch(hexagon)
 
@@ -432,153 +629,100 @@ class ClusterRepresentativity(object):
                      linewidth=2, 
                      zorder=3)
 
+            # Projecting the samples in the map (samples_label is a list and every index in it must be plotted)
+            rep_samples_dic = {}
+            for key, vals in self.som_object.rep_sample().items(): # iterate over each BMU and its samples
+                for target in samples_label: # iterate over each target sample
+                    # check if vals is a list
+                    if isinstance(vals, list):
+                        if target in vals:
+                            rep_samples_dic[key] = vals
+                    else:
+                        if target == vals:
+                            rep_samples_dic[key] = vals
+            samples_label_names = self.som_object._sample_names[samples_label]
+            # Iterate over each neuron in the map (counter is its index)
+            counter = 0
+            for j in range(self.mapsize[1]):
+                for i in range(self.mapsize[0]):
+                    try:
+                        if isinstance(rep_samples_dic[counter+1], list):
+                            total = len(rep_samples_dic[counter+1])
+                            # Find the name of the sample and its position in the neighborhood set list
+                            selected_samples = list(set(samples_label_names).intersection(set(rep_samples_dic[counter+1])))
+                            sample_name, idx_sample = search_strings(selected_samples, rep_samples_dic[counter+1])
+                            rep_sample_name = f"{sample_name}({idx_sample+1}/{total})"
+                                                            
+                        else:
+                            rep_sample_name = rep_samples_dic[counter+1]
+                        
+                        hex = RegularPolygon((xx[(j, i)]*2,
+                                            yy[(j,i)]*2),
+                                            numVertices=6,
+                                            radius=((1/np.sqrt(3))*0.5),
+                                            facecolor='black',
+                                            edgecolor='white',
+                                            linewidth=1.1,
+                                            alpha=1)
+                        ax.add_patch(hex)
+
+                        box_props = {'facecolor': 'white', 'edgecolor': 'black', 'boxstyle': 'round'}
+                        ax.text(xx[(j,i)]*2, yy[(j,i)]*2+1.5*(1/np.sqrt(3)), 
+                                s=f"{rep_sample_name}", 
+                                size = samples_label_fontsize,
+                                horizontalalignment='center', 
+                                verticalalignment='top', 
+                                color='black',
+                                bbox= box_props)
+
+                    except:
+                        pass
+                
+                    counter+=1
+
         # Plotting Parameters
         ax.set_xlim(-0.6-0.5, 2*self.mapsize[0]-0.5+0.6+0.5)
         ax.set_ylim(-0.5660254-0.81, 2*self.mapsize[1]*0.8660254-2*0.560254+0.75+0.2886751)
         ax.set_axis_off()
         ax.invert_yaxis()
 
-        plt.title(title,
-                  horizontalalignment='center',  
-                  verticalalignment='top', 
-                  size=title_size, 
-                  pad=title_pad)
+        # Create a custom colormap with varying alpha values
+        base_rgb = cluster_color[:3]
+        alpha_vals = np.linspace(0, 1, 256)
+        colors = [(base_rgb[0], base_rgb[1], base_rgb[2], a) for a in alpha_vals]
+        alpha_cmap = mpl.colors.ListedColormap(colors)
+        vmin = float(np.min(rep_values))
+        vmax = float(np.max(rep_values))
+        norm = mpl.colors.Normalize(vmin=vmin, vmax=vmax)
 
-        # # Plot legend
-        # legend_top = int(0.2*gs_height)
-        # legend_bottom = int(0.8*gs_height)
-        # if max_clust <=10:
-        #     ax2 = f.add_subplot(gs[legend_top:legend_bottom, 90:])
-        # elif max_clust<=20:
-        #     ax2 = f.add_subplot(gs[legend_top:legend_bottom, 80:])
-        # elif max_clust<=30:
-        #     ax2 = f.add_subplot(gs[legend_top:legend_bottom, 70:])
-        # else:
-        #     ax2 = f.add_subplot(gs[legend_top:legend_bottom, 60:])
+        # Add the colorbar
+        cbar_ax = f.add_subplot(gs[:plot_height, 95:])
+        sm = plt.cm.ScalarMappable(cmap=alpha_cmap, norm=norm)
+        sm.set_array([])
+        cbar = f.colorbar(sm, cax=cbar_ax)
+        # Ticks showing numeric values with just two decimals
+        cbar.set_ticks([vmin, vmax])
+        cbar.set_ticklabels([f"{vmin:.2f}", f"{vmax:.2f}"])
+        # Style
+        cbar.ax.yaxis.set_tick_params(length=0)
+        cbar.ax.tick_params(labelsize=legend_text_size)
+        cbar.outline.set_visible(False)
+        # Legend title
+        cbar.ax.set_title(
+            metric_map[rep_measure] if legend_title == None else legend_title,
+            pad=legend_pad,
+            fontsize=legend_title_size
+        )
 
-        # ax2.invert_yaxis()
-        # ax2.set_aspect('equal')
-
-
-        # n_cols = int(np.ceil(max_clust/10))
-        # n_rows = int(np.ceil(max_clust / n_cols))
-
-        # hex_height = 0.096
-        # pad = (0.1-hex_height)
-        # radius =  hex_height/2
-        # total_height = hex_height * n_rows + n_rows * pad
-        # shift = hex_height
-        # y_start = ((1 - total_height) / 2)+shift/2
-        # x_start = pad+shift/2
-        # text_pad = hex_height*3
-
-        # condition = max_clust-1 if watermark_neurons else max_clust
-
-        # for i, (xfac, yfac) in enumerate(np.ndindex((n_cols, n_rows))):
-        #     if i+1 <= condition-1:
-        #         cluster = i+1
-        #         x_center = x_start+(xfac)*shift+xfac*pad+xfac*text_pad
-        #         y_center = y_start+(yfac)*shift+yfac*pad
-
-        #         color = cmap(norm(cluster))
-
-        #         hex_points = RegularPolygon((x_center, y_center), 
-        #                                     numVertices=6, 
-        #                                     radius=radius,
-        #                                     facecolor=color, 
-        #                                     edgecolor=None, 
-        #                                     alpha=alfa_clust_legend)
-        #         ax2.add_patch(hex_points)
-
-        #         hex_points = RegularPolygon((x_center, y_center), 
-        #                                     numVertices=6, 
-        #                                     radius=radius-radius*0.05,
-        #                                     facecolor=None,
-        #                                     fill=False, 
-        #                                     edgecolor=color,
-        #                                     linewidth=2)
-        #         ax2.add_patch(hex_points)
-        #         if len(custom_labels)>0:
-        #             cluster_name = custom_labels[cluster-1]
-        #         else:
-        #             cluster_name = f"Cluster #{cluster}"
-        #         ax2.annotate(cluster_name,
-        #                     xy=(x_center+radius+0.01, y_center),
-        #                     xytext=(0, 0),
-        #                     textcoords="offset points",
-        #                     color='black',
-        #                     weight='bold',
-        #                     fontsize=legend_text_size,
-        #                     ha='left',
-        #                     va='center')
-        #     else:
-        #         x_center = x_start+(xfac)*shift+xfac*pad+xfac*text_pad
-        #         y_center = y_start+(yfac)*shift+yfac*pad
-
-        #         hex_points = RegularPolygon((x_center, y_center), 
-        #                                 numVertices=6, 
-        #                                 radius=radius-radius*0.05,
-        #                                 facecolor="White",
-        #                                 fill = True, 
-        #                                 edgecolor="Black",
-        #                                 linewidth=2)
-                
-        #         ax2.add_patch(hex_points)
-
-        #         ax2.annotate(typical_neuron_label,
-        #                 xy=(x_center+radius+0.01, y_center),
-        #                 xytext=(0, 0),
-        #                 textcoords="offset points",
-        #                 color='black',
-        #                 weight='bold',
-        #                 fontsize=legend_text_size,
-        #                 ha='left',
-        #                 va='center')
-
-        #         if watermark_neurons or watermark_typical_neurons:
-        #             hex_points = RegularPolygon((x_center, y_start+(yfac+1)*shift+yfac*pad), 
-        #                                     numVertices=6, 
-        #                                     radius=radius-radius*0.05,
-        #                                     facecolor="White",
-        #                                     fill = True, 
-        #                                     edgecolor="Gray",
-        #                                     linewidth=1)
-                    
-        #             ax2.add_patch(hex_points)
-
-        #             ax2.annotate(f"#",
-        #                     xy=(x_center, y_start+(yfac+1)*shift+yfac*pad),
-        #                     xytext=(0, 0),
-        #                     textcoords="offset points",
-        #                     color='black',
-        #                     weight='bold',
-        #                     fontsize=legend_text_size,
-        #                     ha='center',
-        #                     va='center')
-
-        #             ax2.annotate(neuron_number_label,
-        #                     xy=(x_center+radius+0.01, y_start+(yfac+1)*shift+yfac*pad),
-        #                     xytext=(0, 0),
-        #                     textcoords="offset points",
-        #                     color='black',
-        #                     weight='bold',
-        #                     fontsize=legend_text_size,
-        #                     ha='left',
-        #                     va='center')
-
-        #         break
-        
-        # ax2.set_title(legend_title if legend_title!=False else "Legend", 
-        #               fontdict={"fontsize": legend_title_size},
-        #               loc="center", 
-        #               pad=5,
-        #               fontweight='bold',
-        #               y=1-y_start+0.03)
-        
-        # ax2.set_xlim(0, n_cols*hex_height+n_cols*pad+n_cols*text_pad)
-        # ax2.set_ylim(1, -0.01)
-        
-        # ax2.set_axis_off()
+        # Figure title
+        f.suptitle(
+            title,
+            x=0.5,
+            y=0.99,
+            ha='center',
+            va='top',
+            fontsize=title_size
+        )
 
         # Add watermark
         # Add white space subplot below the plot
@@ -1012,18 +1156,6 @@ class ClusterRepresentativity(object):
     #     ax3.imshow(self.foot, aspect='equal', alpha=1)
     #     ax3.axis('off')
 
-
-
-
-
-
-
-
-
-
-
-
-
     def plot_perc_overlap(self):
         """
         Plots a heatmap of normalized overlap between all cluster pairs.
@@ -1045,185 +1177,6 @@ class ClusterRepresentativity(object):
         ax = sns.heatmap(overlap_matrix, annot=True, cmap='Blues', xticklabels=labels, yticklabels=labels)
         plt.title('Normalized Overlap Between Clusters')
         plt.tight_layout()
-        plt.show()
-
-    def cmpf_jitter_plot(self,
-                        plot_height: int = 6,
-                        plot_width: float = 12,
-                        colormap: str = "gist_rainbow",
-                        neurons_max_size: float = 120,
-                        alpha_neuron_legend: float = 0.7,
-                        watermark_neurons: bool = True,
-                        y_watermark_neurons_text: float = 0,
-                        watermark_neurons_fontsize: float = 5,
-                        title: str = "Jittering strip plot with CMPF values per cluster and means",
-                        title_size: float = 12,
-                        xlabel_size: float = 10,
-                        ylabel_size: float = 10,
-                        xlabel: str ="Cluster",
-                        ylabel: str ="CMPF values",
-                        clusters_highlight: list = [],
-                        yrange: list = [0.0,1.0],
-                        legend_title: str = "Clusters weights\nranking (mean CMPF)",
-                        custom_labels: list = [],
-                        legend_loc: str = "center",
-                        legend_title_size: float = 8,
-                        legend_text_size: float = 6,
-                        num_hexa_dist_factor: float = 0.015,
-                        hexa_label_dist_factor: float = 0.025):
-
-        """
-        For visualization of the distributions of CMPF values for each neuron. For visualizing the distributions of the maximum CMPF values for each neuron in the SOM latent space, use "cmpf_som_plot".
-        """
-
-        try:
-            cmpf = self.cmpf
-        except:
-            self.calculate_neurons_cmpf() # calculate the CMPF
-            cmpf = self.cmpf
-
-        n_clusters = cmpf.shape[1]
-
-        # Plot CMPF values to check ties on each cluster
-        f = plt.figure(figsize=(plot_width, plot_height), dpi=300)
-        gs_height = plot_height*10
-        gs_width = plot_width*10
-        gs = gridspec.GridSpec(gs_height, gs_width)
-        if n_clusters <=10:
-            ax1 = f.add_subplot(gs[:int(0.90*gs_height), 0:int(0.89*gs_width)])
-        elif n_clusters <=20:
-            ax1 = f.add_subplot(gs[:int(0.90*gs_height), 0:int(0.79*gs_width)])
-        elif n_clusters <=30:
-            ax1 = f.add_subplot(gs[:int(0.90*gs_height), 0:int(0.69*gs_width)])
-        else:
-            ax1 = f.add_subplot(gs[:int(0.90*gs_height), 0:int(0.59*gs_width)])
-
-        # Jittering strip plot
-        if clusters_highlight == []:
-            clusters_indices = np.arange(n_clusters)
-        else:
-            clusters_indices = np.array(clusters_highlight) - 1
-        cmap = plt.get_cmap(colormap)
-        colors = cmap(np.linspace(0, 1, cmpf.shape[1]))
-        for i, cluster_label in enumerate(clusters_indices):
-            # Plot the neurons
-            y = cmpf[:, cluster_label]
-            x = np.random.normal(i + 1, 0.08, size=len(y))
-            # Plot the mean line of each cluster
-            mean_y = np.mean(y[y > 0])  # ignore neurons with CMPF = 0
-            ax1.hlines(mean_y, i + 0.7, i + 1.3, colors=colors[cluster_label], linestyles='dashed', linewidth=2, zorder=2)
-            # Plot the neurons
-            ax1.scatter(x, y, color=colors[cluster_label], marker='h', alpha=y, edgecolor=colors[cluster_label], s=neurons_max_size*y, zorder=3)
-            if watermark_neurons:
-                for xi, yi, neuron_idx in zip(x, y, range(1, len(y)+1)):
-                    y_text = yi + y_watermark_neurons_text
-                    if yi > mean_y and (yrange[0] <= y_text <= yrange[1]):  # only show for neurons above the mean line and inside the y range
-                        ax1.text(xi, yi + y_watermark_neurons_text, str(neuron_idx),
-                                fontsize=watermark_neurons_fontsize,
-                                ha='center', va='center', color='black')
-
-        ax1.set_ylim(yrange)
-        ax1.set_xticks(np.arange(1, len(clusters_indices) + 1))
-        ax1.set_xticklabels([f'#{i+1}' for i in clusters_indices])
-        ax1.set_xlabel(xlabel, fontsize=xlabel_size)
-        ax1.set_ylabel(ylabel, fontsize=ylabel_size)
-        ax1.grid(True, linestyle='--', alpha=0.7)
-        ax1.set_title(title, fontsize=title_size)
-
-        # Plot legend
-        legend_top = int(0.3*gs_height)
-        legend_bottom = int(0.7*gs_height)
-        if n_clusters <=10:
-            ax2 = f.add_subplot(gs[legend_top:legend_bottom, int(0.90*gs_width):])
-        elif n_clusters<=20:
-            ax2 = f.add_subplot(gs[legend_top:legend_bottom, int(0.80*gs_width):])
-        elif n_clusters<=30:
-            ax2 = f.add_subplot(gs[legend_top:legend_bottom, int(0.70*gs_width):])
-        else:
-            ax2 = f.add_subplot(gs[legend_top:legend_bottom, int(0.60*gs_width):])
-        ax2.invert_yaxis()
-        ax2.set_aspect('equal')
-
-        # Legend layout parameters
-        n_cols = int(np.ceil(n_clusters/10))
-        n_rows = int(np.ceil(n_clusters / n_cols))
-        hex_height = 0.096
-        pad = (0.1-hex_height)
-        radius =  hex_height/2
-        total_height = hex_height * n_rows + n_rows * pad
-        shift = hex_height
-        y_start = ((1 - total_height) / 2)+shift/2
-        x_start = pad+shift/2
-        text_pad = hex_height*3
-
-        # Fill legend layout
-        clusters_order = self.clusters_order
-        for i, (xfac, yfac) in enumerate(np.ndindex((n_cols, n_rows))):
-            x_center = x_start+(xfac)*shift+xfac*pad+xfac*text_pad
-            y_center = y_start+(yfac)*shift+yfac*pad
-            ax2.annotate(f'{i+1}.',
-                xy=(x_center, y_center),
-                xytext=(0, 0),
-                textcoords="offset points",
-                color='black',
-                weight='bold',
-                fontsize=legend_text_size,
-                ha='left',
-                va='center')
-
-            clust_idx = np.where(clusters_order == i+1)[0][0]
-            hex_points = RegularPolygon((x_center+radius+num_hexa_dist_factor*legend_text_size, y_center), 
-                numVertices=6, 
-                radius=radius-radius*0.05,
-                facecolor=colors[clust_idx],
-                fill = True,
-                alpha=alpha_neuron_legend,
-                edgecolor=colors[clust_idx],
-                linewidth=2)
-            ax2.add_patch(hex_points)
-
-            if custom_labels != []:
-                ax2.annotate(custom_labels[clust_idx],
-                    xy=(x_center+1.2*radius+hexa_label_dist_factor*legend_text_size, y_center),
-                    xytext=(0, 0),
-                    textcoords="offset points",
-                    color='black',
-                    weight='bold',
-                    fontsize=legend_text_size,
-                    ha='left',
-                    va='center')
-            else:
-                ax2.annotate(f'Cluster #{clust_idx+1}',
-                    xy=(x_center+1.2*radius+hexa_label_dist_factor*legend_text_size, y_center),
-                    xytext=(0, 0),
-                    textcoords="offset points",
-                    color='black',
-                    weight='bold',
-                    fontsize=legend_text_size,
-                    ha='left',
-                    va='center')
-
-        ax2.set_title(legend_title, 
-                      fontdict={"fontsize": legend_title_size},
-                      loc=legend_loc, 
-                      pad=5,
-                      fontweight='bold',
-                      y=1-y_start+0.03)
-        
-        ax2.set_xlim(0, n_cols*hex_height+n_cols*pad+n_cols*text_pad)
-        ax2.set_ylim(1, -0.01)
-        
-        ax2.set_axis_off()
-
-        # Add watermark
-        # Add white space subplot below the plot
-        image_width = 4*(gs_height-int(0.95*gs_height))
-        ax3 = f.add_subplot(gs[int(0.95*gs_height):gs_height, 0:image_width], zorder=-1)
-
-        # Add the watermark image to the white space subplot
-        ax3.imshow(self.foot, aspect='equal', alpha=1)
-        ax3.axis('off')
-
         plt.show()
 
     @staticmethod
