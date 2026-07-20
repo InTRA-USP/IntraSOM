@@ -1933,113 +1933,324 @@ class SOM(object):
     @property
     def topographic_error(self):
         """
-        Function to calculate the topographic error.
+        Calculates the topographic error of the trained SOM.
+
+        The topographic error is the proportion of samples for which
+        the first and second Best Matching Units (BMUs) are not direct
+        neighbors on the SOM grid.
+
+        The neighborhood relationship is obtained directly from the
+        precomputed map distance matrix, so this method supports:
+
+            - rectangular planar maps
+            - rectangular toroidal maps
+            - hexagonal planar maps
+            - hexagonal toroidal maps
+
+        Returns
+        -------
+        float
+            Topographic error between 0 and 1.
         """
-        bmus1 = self._find_bmu(self.get_data, nth=1, pace_size=self.pace_size)[0].astype(int)
-        bmus2 = self._find_bmu(self.get_data, nth=2, pace_size=self.pace_size)[0].astype(int)
 
-        rows = self.mapsize[1]
-        cols = self.mapsize[0]
+        # --------------------------------------------------
+        # FIRST BMU
+        # --------------------------------------------------
 
-        #odd-r offset
-        ii = [[1, 0, -1, -1, -1, 0], [1, 1, 0, -1, 0, 1]]
-        jj = [[0, 1, 1, 0, -1, -1], [0, 1, 1, 0, -1, -1]]
+        bmus1 = self._find_bmu(
+            self.get_data,
+            nth=1,
+            pace_size=self.pace_size
+        )[0].astype(int)
 
-        neigs = np.zeros((cols*rows,6))
-        neuron_grid = np.arange(1, rows * cols + 1).reshape(rows, cols)
+        # --------------------------------------------------
+        # SECOND BMU
+        # --------------------------------------------------
 
-        for y in range(rows):
-            for x in range(cols):
-                current_index = neuron_grid[y, x] - 1
-                
-                for k, (i, j) in enumerate(zip(ii[y % 2], jj[y % 2])):
-                    new_y = (y + j) % rows  # Wrap-around in the vertical direction
-                    new_x = (x + i) % cols  # Wrap-around in the horizontal direction
-                    
-                    neigs[current_index, k] = neuron_grid[new_y, new_x]
-        neigs = neigs.astype(int)
+        bmus2 = self._find_bmu(
+            self.get_data,
+            nth=2,
+            pace_size=self.pace_size
+        )[0].astype(int)
 
-        bmus1_ind = bmus1-1
+        # --------------------------------------------------
+        # GRID DISTANCE BETWEEN FIRST AND SECOND BMUs
+        # --------------------------------------------------
 
-        bmus1_neig = neigs[bmus1_ind]
-        error_counter = 0
-        for i,bmu2 in enumerate(bmus2):
-            if bmu2 not in bmus1_neig[i]:
-                error_counter +=1
-        topo_error = error_counter/bmus1_ind.shape[0]
+        distances = self._distance_matrix[
+            bmus1,
+            bmus2
+        ]
 
-        return topo_error
+        # Direct neighbors have grid distance == 1.
+        #
+        # Any distance different from 1 means that the first
+        # and second BMUs are not adjacent and therefore
+        # contribute to the topographic error.
+        errors = distances != 1
+
+        # Proportion of samples with topology violation
+        return float(
+            np.mean(errors)
+        )
         
 
     def build_umatrix(self, expanded=False, log=False):
         """
-        Function to calculate the U-Matrix of unified distances from the
-        trained weight matrix.
+        Calculates the U-Matrix from distances between neighboring
+        SOM codebook vectors.
 
-        Args:
-            expanded: boolean value to indicate whether the return will be from the
-                summarized unified distances matrix (average of distances from the 6
-                neighborhood BMU) or expanded (all distance values)
-                
-        Returns:
-            Expanded or summarized unified distances matrix.
+        Supports:
+            - Hexagonal lattice ("hexa")
+            - Rectangular lattice ("rect")
+            - Planar topology ("planar")
+            - Toroidal topology ("toroid")
+
+        Parameters
+        ----------
+        expanded : bool, default=False
+            If True, returns the individual distance to each neighbor.
+
+            Shapes:
+                hexa -> (rows, cols, 6)
+                rect -> (rows, cols, 4)
+
+            If False, returns the mean neighboring distance:
+
+                shape -> (rows, cols)
+
+        log : bool, default=False
+            If True, applies the natural logarithm to the resulting
+            distances.
+
+        Returns
+        -------
+        numpy.ndarray
+            Expanded or summarized U-Matrix.
         """
-        # Function to find distance quickly
+
         def fast_norm(x):
             """
-            Retorna a norma L2 de um array 1-D.
+            Returns the Euclidean norm of a 1-D vector.
             """
-            return np.sqrt(np.dot(x, x.T))
+            return np.sqrt(
+                np.dot(x, x.T)
+            )
 
-        # Matrix of BMU weights
-        weights = np.reshape(self.codebook.matrix, (self.mapsize[1], self.mapsize[0], self.codebook.matrix.shape[1]))
+        # --------------------------------------------------
+        # CODEBOOK MATRIX
+        # mapsize = (columns, rows)
+        # weights shape = (rows, columns, features)
+        # --------------------------------------------------
 
-        # Neighbor hexagonal search
-        if self.lattice == 'hexa':
-            ii = [[1, 1, 0, -1, 0, 1], [1, 0,-1, -1, -1, 0]]
-            jj = [[0, 1, 1, 0, -1, -1], [0, 1, 1, 0, -1, -1]]
-            # Initialize U-Matrix
-            um = np.nan * np.zeros((weights.shape[0], weights.shape[1], 6))
-        # elif self.lattice == 'quad':
-        #    ii = [[1, 0, -1,  0], [1, 0, -1,  0]]
-        #    jj = [[0, 1,  0, -1], [0, 1,  0, -1]]
-        #    # Initialize U-Matrix
-        #    um = np.nan * np.zeros((weights.shape[0], weights.shape[1], 4))
+        rows = self.mapsize[1]
+        cols = self.mapsize[0]
+
+        weights = np.reshape(
+            self.codebook.matrix,
+            (
+                rows,
+                cols,
+                self.codebook.matrix.shape[1]
+            )
+        )
+
+        # --------------------------------------------------
+        # NEIGHBOR DEFINITIONS
+        # --------------------------------------------------
+
+        if self.lattice == "hexa":
+
+            # odd-r hexagonal lattice
+            #
+            # Two configurations are required because alternate
+            # rows are horizontally shifted.
+
+            ii = [
+                [1, 1, 0, -1, 0, 1],
+                [1, 0, -1, -1, -1, 0]
+            ]
+
+            jj = [
+                [0, 1, 1, 0, -1, -1],
+                [0, 1, 1, 0, -1, -1]
+            ]
+
+            n_neighbors = 6
+
+        elif self.lattice == "rect":
+
+            # Rectangular lattice:
+            #
+            # right, bottom, left, top
+            #
+            # Both row parities are identical because there
+            # is no odd-r displacement.
+
+            ii = [
+                [1, 0, -1, 0],
+                [1, 0, -1, 0]
+            ]
+
+            jj = [
+                [0, 1, 0, -1],
+                [0, 1, 0, -1]
+            ]
+
+            n_neighbors = 4
+
         else:
-            raise Exception("build_umatrix error: non hexagonal lattice not implemented!")
 
-        # Fill U-Matrix
-        if self.mapshape == 'planar':
-            for y in range(weights.shape[0]):
-                for x in range(weights.shape[1]):
+            raise ValueError(
+                "lattice must be 'hexa' or 'rect'. "
+                f"Received: {self.lattice!r}"
+            )
+
+        # --------------------------------------------------
+        # INITIALIZE EXPANDED U-MATRIX
+        # --------------------------------------------------
+
+        um = np.full(
+            (
+                rows,
+                cols,
+                n_neighbors
+            ),
+            np.nan,
+            dtype=float
+        )
+
+        # --------------------------------------------------
+        # PLANAR TOPOLOGY
+        # --------------------------------------------------
+
+        if self.mapshape == "planar":
+
+            for y in range(rows):
+
+                for x in range(cols):
+
                     w_2 = weights[y, x]
-                    e = y % 2 == 0
-                    for k, (i, j) in enumerate(zip(ii[e], jj[e])):
-                        if (x+i >= 0 and x+i < weights.shape[1] and y+j >= 0 and y+j < weights.shape[0]): ## if not periodic (non toroidal)
-                            w_1 = weights[y+j, x+i]
-                            um[y, x, k] = fast_norm(w_2-w_1)
-                    # this is needed to avoid identation error with the outer elif
-        elif self.mapshape == 'toroid': # trick for periodic
-            for y in range(weights.shape[0]):
-                for x in range(weights.shape[1]):
+
+                    # Required only for hexagonal odd-r.
+                    # For rectangular lattices both lists are identical.
+                    parity = y % 2
+
+                    for k, (dx, dy) in enumerate(
+                        zip(
+                            ii[parity],
+                            jj[parity]
+                        )
+                    ):
+
+                        nx = x + dx
+                        ny = y + dy
+
+                        # Planar maps do not wrap around borders.
+                        if (
+                            0 <= nx < cols
+                            and
+                            0 <= ny < rows
+                        ):
+
+                            w_1 = weights[
+                                ny,
+                                nx
+                            ]
+
+                            um[
+                                y,
+                                x,
+                                k
+                            ] = fast_norm(
+                                w_2 - w_1
+                            )
+
+        # --------------------------------------------------
+        # TOROIDAL TOPOLOGY
+        # --------------------------------------------------
+
+        elif self.mapshape == "toroid":
+
+            for y in range(rows):
+
+                for x in range(cols):
+
                     w_2 = weights[y, x]
-                    e = y % 2 == 0
-                    for k, (i, j) in enumerate(zip(ii[e], jj[e])):
-                        index_y = ( y + j ) % self.mapsize[1] ## neighbors - -1 is handled by numpy, but beyond the mapsize we use % mapsize trick
-                        index_x = ( x + i ) % self.mapsize[0] ## neighbors - -1 is handled by numpy, but beyond the mapsize we use % mapsize trick
-                        w_1 = weights[ index_y, index_x]
-                        um[y, x, k] = fast_norm(w_2-w_1)
+
+                    parity = y % 2
+
+                    for k, (dx, dy) in enumerate(
+                        zip(
+                            ii[parity],
+                            jj[parity]
+                        )
+                    ):
+
+                        # Periodic boundary conditions
+                        ny = (
+                            y + dy
+                        ) % rows
+
+                        nx = (
+                            x + dx
+                        ) % cols
+
+                        w_1 = weights[
+                            ny,
+                            nx
+                        ]
+
+                        um[
+                            y,
+                            x,
+                            k
+                        ] = fast_norm(
+                            w_2 - w_1
+                        )
+
         else:
-            raise Exception("mapshape '%s' not acceptable"%self.mapshape)
-        
+
+            raise ValueError(
+                "mapshape must be 'planar' or 'toroid'. "
+                f"Received: {self.mapshape!r}"
+            )
+
+        # --------------------------------------------------
+        # RETURN EXPANDED U-MATRIX
+        # --------------------------------------------------
+
         if expanded:
-            # Expanded U-Matrix
-            # return um
-            return np.log(um) if log else um
-        else:
-            # Reduced U-Matrix
-            # return np.nanmean(um, axis=2)
-            return np.log(np.nanmean(um, axis=2)) if log else np.nanmean(um, axis=2)
+
+            if log:
+
+                with np.errstate(
+                    divide="ignore",
+                    invalid="ignore"
+                ):
+                    return np.log(um)
+
+            return um
+
+        # --------------------------------------------------
+        # REDUCED U-MATRIX
+        # Mean distance to valid neighboring neurons
+        # --------------------------------------------------
+
+        umat = np.nanmean(
+            um,
+            axis=2
+        )
+
+        if log:
+
+            with np.errstate(
+                divide="ignore",
+                invalid="ignore"
+            ):
+                return np.log(umat)
+
+        return umat
         
     
     def plot_umatrix(self,
