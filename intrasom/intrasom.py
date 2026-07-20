@@ -484,45 +484,93 @@ class SOM(object):
 
     @property  
     def calculate_map_dist(self):
-        """
-        Calculates the grid distances, which will be used during the training
-        steps and returns them in the form of an array of internal distances
-        from the grid.
-        """
-        # Capture the number of training neurons
+
         nnodes = self.codebook.nnodes
 
-        # Create a matrix of zeros in the format nnodes x nnodes
-        distance_matrix = np.zeros((nnodes, nnodes))
-        
-        # Iterates over the nodes and fills the distance matrix for each node,
-        # through the grid_dist function
-        print("Initializing map...")
-        if self.mapshape == "toroid":
-            # Access matrix for the first neuron
-            initial_matrix = self.codebook.grid_dist(0).reshape(self.mapsize[1], self.mapsize[0])
-            
-            counter = 0
-            for i in tqdm(range(self.mapsize[1]), position=0, leave=True, desc="Creating Neuron Distance Rows", unit="rows"):
-                for j in range(self.mapsize[0]):
-                    shifted = shift(initial_matrix, (i,j), mode='grid-wrap')
-                    #account for odd-r shifts - j direction
-                    if self.lattice == "hexa" and i % 2 != 0:
+        distance_matrix = np.zeros(
+            (nnodes, nnodes),
+            dtype=int
+        )
 
-                        shifted[0::2] = shift(
+        print("Initializing map...")
+
+        # --------------------------------------------------
+        # TOROIDAL
+        # --------------------------------------------------
+
+        if self.mapshape == "toroid":
+
+            # Only the distances from neuron 0 are calculated
+            initial_matrix = (
+                self.codebook
+                .grid_dist(0)
+                .reshape(
+                    self.mapsize[1],  # rows
+                    self.mapsize[0]   # columns
+                )
+            )
+
+            counter = 0
+
+            for i in tqdm(
+                range(self.mapsize[1]),
+                position=0,
+                leave=True,
+                desc="Creating Neuron Distance Rows",
+                unit="rows"
+            ):
+
+                for j in range(self.mapsize[0]):
+
+                    # Periodic translation
+                    shifted = np.roll(
+                        initial_matrix,
+                        shift=(i, j),
+                        axis=(0, 1)
+                    )
+
+                    # Extra correction only for odd-r
+                    # HEXAGONAL lattices
+                    if (
+                        self.lattice == "hexa"
+                        and i % 2 != 0
+                    ):
+
+                        shifted[0::2] = np.roll(
                             shifted[0::2],
-                            (0, 1),
-                            mode='grid-wrap'
+                            shift=1,
+                            axis=1
                         )
+
+                    distance_matrix[counter] = (
+                        shifted.ravel()
+                    )
+
+                    counter += 1
+
+        # --------------------------------------------------
+        # PLANAR
+        # --------------------------------------------------
+
         elif self.mapshape == "planar":
-            for i in tqdm(range(nnodes), desc="Creating Neuron Distance Rows", unit=" Neurons"):
-                dist = self.codebook.grid_dist(i)
-                distance_matrix[i,:] = dist
-                del dist 
+
+            for i in tqdm(
+                range(nnodes),
+                desc="Creating Neuron Distance Rows",
+                unit="Neurons"
+            ):
+
+                distance_matrix[i, :] = (
+                    self.codebook.grid_dist(i)
+                )
+
         else:
-            sys.exit("Mapshape only accepts 'toroid' or 'planar' as parameter")
-            
-        
+
+            raise ValueError(
+                "mapshape only accepts "
+                "'toroid' or 'planar'."
+            )
+
         return distance_matrix
 
     @property

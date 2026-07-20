@@ -164,28 +164,34 @@ class Codebook(object):
 
     def _rect_dist_plan(self, node_ind):
         """
-        Finds the Manhattan distance matrix (L1) of a neural network node
-        for all others, for a rectangular lattice in a map with
-        planar topology.
+        Calculates Manhattan distances from one node to all other nodes
+        in a rectangular lattice with planar topology.
 
-        Args:
-            node_ind: neural network node index, between 0 and nnodes-1.
+        Parameters
+        ----------
+        node_ind : int
+            Node index between 0 and nnodes - 1.
 
-        Returns:
-            Returns array of distances from this node to all other nodes in the
-            grid, on a planar map.
-
+        Returns
+        -------
+        numpy.ndarray
+            Manhattan distance from node_ind to every node.
         """
-        # Separate column and row values
-        rows, cols = self.mapsize
 
-        # Generate the xy coordinates of the BMUs for a rectangular grid
-        coordinates = self.generate_rec_lattice(rows, cols)
+        # mapsize = (columns, rows)
+        cols, rows = self.mapsize
 
-        # Find the Manhattan distances for a rectangular grid through
-        # its coordinates
+        # generate_rec_lattice expects (n_rows, n_columns)
+        coordinates = self.generate_rec_lattice(
+            rows,
+            cols
+        )
+
         dist = np.array([
-            abs(coordinates[ind] - coordinates[node_ind]).sum()
+            np.abs(
+                coordinates[ind]
+                - coordinates[node_ind]
+            ).sum()
             for ind in range(len(coordinates))
         ])
 
