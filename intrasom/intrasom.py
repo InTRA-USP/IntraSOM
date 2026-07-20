@@ -153,6 +153,12 @@ class SOMFactory(object):
                 normalization,
                 weights=feature_weights
             )
+
+        else:
+
+            normalizer = NormalizerFactory.build(
+                normalization
+            )
         # Build the neighborhood calculation object according to the function of
         # specified neighborhood
         neigh_calc = NeighborhoodFactory.build(neighborhood)
