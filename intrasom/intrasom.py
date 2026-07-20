@@ -507,10 +507,13 @@ class SOM(object):
                 for j in range(self.mapsize[0]):
                     shifted = shift(initial_matrix, (i,j), mode='grid-wrap')
                     #account for odd-r shifts - j direction
-                    if i%2!=0:
-                        shifted[0::2] = shift(shifted[0::2], (0,1), mode='grid-wrap')
-                    distance_matrix[counter] = shifted.flatten().astype(int)
-                    counter+=1
+                    if self.lattice == "hexa" and i % 2 != 0:
+
+                        shifted[0::2] = shift(
+                            shifted[0::2],
+                            (0, 1),
+                            mode='grid-wrap'
+                        )
         elif self.mapshape == "planar":
             for i in tqdm(range(nnodes), desc="Creating Neuron Distance Rows", unit=" Neurons"):
                 dist = self.codebook.grid_dist(i)

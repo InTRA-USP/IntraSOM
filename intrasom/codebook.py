@@ -184,37 +184,53 @@ class Codebook(object):
 
         # Find the Manhattan distances for a rectangular grid through
         # its coordinates
-        dist = np.array(abs(coordinates[ind] - coordinates[node_ind]).sum() \
-            for ind in range(len(coordinates)))
+        dist = np.array([
+            abs(coordinates[ind] - coordinates[node_ind]).sum()
+            for ind in range(len(coordinates))
+        ])
 
         return dist
 
     def _rect_dist_tor(self, node_ind):
         """
-        Finds the matrix of distances from a neural network node to all
-        others, for a hexagonal lattice in a map with toroidal topology.
-        Args:
-            node_ind: Neural network node index, between 0 and nnodes-1.
+        Calculates Manhattan distances from one node to all other nodes
+        in a rectangular lattice with toroidal topology.
 
-        Returns:
-            Returns the distances from this node to all other grid nodes, in a
-            toroidal map.
+        Parameters
+        ----------
+        node_ind : int
+            Node index between 0 and nnodes - 1.
 
+        Returns
+        -------
+        numpy.ndarray
+            Distance from node_ind to every node in the toroidal
+            rectangular grid.
         """
-        rows, cols = self.mapsize
 
-        # Generate the xy coordinates of the BMUs for a rectangular grid
-        coordinates = self.generate_hex_lattice(rows, cols)
+        cols, rows = self.mapsize
 
-        # Extends the distance search to the neighborhood created by the toroidal topology, creating periodicity of the data
-        toroid_neigh = [[0, 0], [cols, 0], [cols, rows], [0, -rows],
-            [-cols, 0], [0, -rows], [-cols, -rows]]
+        # Convert linear index to row/column coordinates
+        node_row = node_ind // cols
+        node_col = node_ind % cols
 
-        # Calculate the distances in the toroidal topology, finding all possible distances according to toroid_neigh and
-        # selecting the smallest
-        dist = np.array(
-            [min([abs((coordinates[ind] + [neig]) - coordinates[node_ind]).sum()\
-             for neig in toroid_neigh]) for ind in range(len(coordinates))])
+        dist = np.zeros(self.nnodes, dtype=int)
+
+        for ind in range(self.nnodes):
+
+            row = ind // cols
+            col = ind % cols
+
+            # Direct distances
+            dx = abs(col - node_col)
+            dy = abs(row - node_row)
+
+            # Toroidal shortest distances
+            dx = min(dx, cols - dx)
+            dy = min(dy, rows - dy)
+
+            # Manhattan distance
+            dist[ind] = dx + dy
 
         return dist
 
