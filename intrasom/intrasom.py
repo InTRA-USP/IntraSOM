@@ -20,7 +20,6 @@ from scipy.ndimage import shift
 # Plots
 import matplotlib.pyplot as plt
 from matplotlib.patches import RegularPolygon, Rectangle
-from matplotlib import cm
 import matplotlib.gridspec as gridspec
 import matplotlib as mpl
 
@@ -48,7 +47,8 @@ class SOMFactory(object):
               missing=False,
               pred_size=0,
               dist_factor = 2, 
-              pace_size=500):
+              pace_size=500,
+              feature_weights=None):
         """
 
          onstructs an object for SOM training, with the data parameters,
@@ -134,8 +134,25 @@ class SOMFactory(object):
         """
         # Apply normalization if it is defined
         normalization = "None" if normalization is None else normalization
-        normalizer = NormalizerFactory.build(normalization)
 
+        if normalization == "var_weighted":
+
+            if feature_weights is None:
+                raise ValueError(
+                    "feature_weights must be provided when "
+                    "normalization='var_weighted'."
+                )
+
+            if len(feature_weights) != data.shape[1]:
+                raise ValueError(
+                    f"Expected {data.shape[1]} feature weights, "
+                    f"but received {len(feature_weights)}."
+                )
+
+            normalizer = NormalizerFactory.build(
+                normalization,
+                weights=feature_weights
+            )
         # Build the neighborhood calculation object according to the function of
         # specified neighborhood
         neigh_calc = NeighborhoodFactory.build(neighborhood)
@@ -157,7 +174,8 @@ class SOMFactory(object):
                    missing = missing,
                    pred_size = pred_size,
                    dist_factor = dist_factor,
-                   pace_size=pace_size)
+                   pace_size=pace_size,
+                   feature_weights=feature_weights)
 
     @staticmethod
     def load_som(data,
@@ -183,7 +201,19 @@ class SOMFactory(object):
         """
         print("Loading data...")
         normalization = params["normalization"]
-        normalizer = NormalizerFactory.build(normalization)
+
+        feature_weights = params.get(
+            "feature_weights",
+            None
+        )
+
+        if normalization == "var_weighted":
+            normalizer = NormalizerFactory.build(
+                normalization,
+                weights=feature_weights
+            )
+        else:
+            normalizer = NormalizerFactory.build(normalization)
         neigh_calc = NeighborhoodFactory.build(params["neighborhood"])
         mapsize = params["mapsize"]
         mask = params["mask"]
@@ -226,7 +256,8 @@ class SOMFactory(object):
                    trained_neurons = trained_neurons, 
                    bmus = bmus,
                    dist_factor = dist_factor,
-                   pace_size=pace_size)
+                   pace_size=pace_size,
+                   feature_weights=feature_weights)
 
 class SOM(object):
 
@@ -235,6 +266,7 @@ class SOM(object):
                  neighborhood='gaussian',
                  normalizer="var",
                  normalization = "var",
+                 feature_weights=None,
                  mapsize=None,
                  mask=None,
                  mapshape='toroid',
@@ -286,6 +318,7 @@ class SOM(object):
         print("Normalizing data...")
         self._normalizer = normalizer
         self._normalization = "None" if normalization is None else normalization
+        self.feature_weights = feature_weights
         self._dim = data.shape[1]
         self._dlen = data.shape[0]
         self.pred_size = pred_size
@@ -400,6 +433,11 @@ class SOM(object):
         dic["lattice"] = self.lattice
         dic["neighborhood"] = self.neighborhood.name
         dic["normalization"] = self._normalization
+        dic["feature_weights"] = (
+                None
+                if self.feature_weights is None
+                else list(self.feature_weights)
+            )
         dic["initialization"] = self.initialization
         dic["training"] = self.training
         dic["pace_size"] = self.pace_size
@@ -576,13 +614,15 @@ class SOM(object):
         """
 
         # Dictionary to make the terms more explanatory
-        dic_params={
-            "var":"Variance",
-            "toroid":"Toroid",
-            "hexa":"Hexagonal",
-            "random":"Randomic",
-            "gaussian":"Gaussian",
-            True:"Yes"
+        dic_params = {
+            "var": "Variance",
+            "var_weighted": "Weighted Variance",
+            "None": "None",
+            "toroid": "Toroid",
+            "hexa": "Hexagonal",
+            "random": "Randomic",
+            "gaussian": "Gaussian",
+            True: "Yes"
         }
 
         # Open a text file
@@ -612,6 +652,17 @@ class SOM(object):
         text_file.write(f"Training Polygon: {dic_params.get(self.mapshape)}\n")
         text_file.write(f"Lattice: {dic_params.get(self.lattice)}\n")
         text_file.write(f"Normalization: {dic_params.get(self._normalizer.name)}\n")
+        if self._normalizer.name == "var_weighted":
+
+            text_file.write("Feature Weights:\n")
+
+            for feature, weight in zip(
+                self._component_names,
+                self.feature_weights
+            ):
+                text_file.write(
+                    f"  {feature}: {weight}\n"
+                )
         text_file.write(f"Initialization: {dic_params.get(self.initialization)}\n")
         text_file.write(f"Neighborhood Function: {dic_params.get(self.neighborhood.name)}\n")
         if self.missing:
@@ -1984,7 +2035,7 @@ class SOM(object):
                                       yy[(j,i)]*2),
                                      numVertices=6,
                                      radius=1/np.sqrt(3),
-                                     facecolor= cm.jet(norm(umat[j][i])),
+                                     facecolor= mpl.colormaps["jet"](norm(umat[j][i])),
                                      alpha=1)#, edgecolor='black')
 
                 ax.add_patch(hex)
@@ -1995,7 +2046,7 @@ class SOM(object):
                                           yy[(j,i)]*2),
                                          numVertices=6,
                                          radius=1/np.sqrt(3),
-                                         facecolor=cm.jet(norm(um[j,i,0])),
+                                         facecolor=mpl.colormaps["jet"](norm(um[j,i,0])),
                                          alpha=1)
                     ax.add_patch(hex)
 
@@ -2005,7 +2056,7 @@ class SOM(object):
                                           yy[(j,i)]*2+(np.sqrt(3)/2)),
                                          numVertices=6,
                                          radius=1/np.sqrt(3),
-                                         facecolor=cm.jet(norm(um[j,i,1])),
+                                         facecolor=mpl.colormaps["jet"](norm(um[j,i,1])),
                                          alpha=1)
                     ax.add_patch(hex)
 
@@ -2015,7 +2066,7 @@ class SOM(object):
                                           yy[(j,i)]*2+(np.sqrt(3)/2)),
                                          numVertices=6,
                                          radius=1/np.sqrt(3),
-                                         facecolor=cm.jet(norm(um[j,i,2])),
+                                         facecolor=mpl.colormaps["jet"](norm(um[j,i,2])),
                                          alpha=1)
                     ax.add_patch(hex)
                     
