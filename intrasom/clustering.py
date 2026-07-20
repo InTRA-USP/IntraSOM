@@ -9,7 +9,6 @@ from matplotlib import pyplot as plt
 import matplotlib as mpl
 import matplotlib.gridspec as gridspec
 from matplotlib.patches import RegularPolygon
-from matplotlib import cm
 
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import minmax_scale
@@ -411,7 +410,7 @@ class ClusterFactory(object):
                                           yy[(j,i)]*2),
                                          numVertices=6,
                                          radius=1/np.sqrt(3),
-                                         facecolor= cm.jet(norm(umat[j][i])),
+                                         facecolor= mpl.colormaps["jet"](norm(umat[j][i])),
                                          alpha=alfa, 
                                          zorder=0)#, edgecolor='black')
 
@@ -423,7 +422,7 @@ class ClusterFactory(object):
                                               yy[(j,i)]*2),
                                              numVertices=6,
                                              radius=1/np.sqrt(3),
-                                             facecolor=cm.jet(norm(um[j,i,0])),
+                                             facecolor=mpl.colormaps["jet"](norm(um[j,i,0])),
                                              alpha=alfa, 
                                              zorder=0)
                         ax.add_patch(hexagon)
@@ -434,7 +433,7 @@ class ClusterFactory(object):
                                               yy[(j,i)]*2+(np.sqrt(3)/2)),
                                              numVertices=6,
                                              radius=1/np.sqrt(3),
-                                             facecolor=cm.jet(norm(um[j,i,1])),
+                                             facecolor=mpl.colormaps["jet"]jet(norm(um[j,i,1])),
                                              alpha=alfa, 
                                              zorder=0)
                         ax.add_patch(hexagon)
@@ -445,7 +444,7 @@ class ClusterFactory(object):
                                               yy[(j,i)]*2+(np.sqrt(3)/2)),
                                              numVertices=6,
                                              radius=1/np.sqrt(3),
-                                             facecolor=cm.jet(norm(um[j,i,2])),
+                                             facecolor=mpl.colormaps["jet"]jet(norm(um[j,i,2])),
                                              alpha=alfa, 
                                              zorder=0)
                         ax.add_patch(hexagon)
@@ -467,7 +466,7 @@ class ClusterFactory(object):
         
         norm = mpl.colors.Normalize(vmin=np.nanmin(clusters), vmax=np.nanmax(clusters))
 
-        cmap = cm.get_cmap(colormap)
+        cmap = mpl.colormaps.get_cmap(colormap)
         if cluster_outline:
             cluster_vertices_dict = {}
 
