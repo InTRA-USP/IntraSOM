@@ -121,18 +121,90 @@ class ClusterFactory(object):
 
             return count
 
-        # --- Dados
-        X = np.asarray(self.neuron_matrix)
+        # --------------------------------------------------
+        # DATA
+        # --------------------------------------------------
 
-        # Normalização robusta (evita std==0)
-        mean = np.mean(X, axis=0)
-        std = np.std(X, axis=0)
+        X = np.asarray(
+            self.neuron_matrix,
+            dtype=float
+        )
+
+        n_samples = X.shape[0]
+
+        # Davies-Bouldin requires at least:
+        #
+        #   2 clusters
+        #   and
+        #   n_clusters < n_samples
+        #
+        if n_samples < 3:
+
+            raise ValueError(
+                "Davies-Bouldin analysis requires "
+                "at least 3 neurons."
+            )
+
+
+        # --------------------------------------------------
+        # NORMALIZATION
+        # --------------------------------------------------
+
+        mean = np.mean(
+            X,
+            axis=0
+        )
+
+        std = np.std(
+            X,
+            axis=0
+        )
+
         eps = 1e-12
-        std_safe = np.where(std < eps, 1.0, std)
-        X = (X - mean) / std_safe
 
-        # --- Varredura DBI
-        n_clusters = np.arange(2, max_clust + 1, 1)
+        std_safe = np.where(
+            std < eps,
+            1.0,
+            std
+        )
+
+        X = (
+            X - mean
+        ) / std_safe
+
+
+        # --------------------------------------------------
+        # VALID CLUSTER RANGE
+        # --------------------------------------------------
+
+        max_valid_clust = min(
+            int(max_clust),
+            n_samples - 1
+        )
+
+        if max_valid_clust < 2:
+
+            raise ValueError(
+                "The maximum number of clusters "
+                "must be at least 2."
+            )
+
+
+        if max_clust > max_valid_clust:
+
+            print(
+                f"max_clust={max_clust} is larger than "
+                f"the maximum valid value for "
+                f"{n_samples} neurons. "
+                f"Using max_clust={max_valid_clust}."
+            )
+
+
+        n_clusters = np.arange(
+            2,
+            max_valid_clust + 1,
+            dtype=int
+        )
         db_summary = {}
 
         for it in tqdm(range(n_iter)):
