@@ -43,6 +43,7 @@
     "SOM.calculate_quantization_error_expanded",
     "SOM.component_names",
     "SOM.denorm_data",
+    "SOM.faster_summary",
     "SOM.finetune_train",
     "SOM.get_data",
     "SOM.imput_missing",
@@ -136,5 +137,7 @@
     "WeightedVarianceNormalizer.normalize",
     "WeightedVarianceNormalizer.normalize_by"
   ],
-  "uncovered": []
+  "uncovered": [
+    "SOM.faster_summary"
+  ]
 }
