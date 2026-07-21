@@ -131,6 +131,10 @@ class VarianceNormalizer(Normalizer):
 class NoneNormalizer(Normalizer):
     """
     Class for handling cases when normalization should not be applied.
+
+    The method signatures are kept compatible with the other
+    normalizers so that the same projection and denormalization
+    routines can be used independently of the selected normalization.
     """
 
     name = "None"
@@ -138,10 +142,22 @@ class NoneNormalizer(Normalizer):
     def normalize(self, data):
         return data
 
-    def normalize_by(self, raw_data, data):
+    def normalize_by(
+        self,
+        raw_data,
+        data,
+        with_labels=False,
+        pred_size=None
+    ):
         return data
 
-    def denormalize_by(self, raw_data, data):
+    def denormalize_by(
+        self,
+        raw_data,
+        data,
+        with_labels=False,
+        pred_size=None
+    ):
         return data
 
 class WeightedVarianceNormalizer(VarianceNormalizer):
@@ -177,26 +193,40 @@ class WeightedVarianceNormalizer(VarianceNormalizer):
     def __init__(self, weights=None):
         self.weights = weights
 
-    def _get_weight_factors(self, n_features):
+    def _get_weight_factors(
+        self,
+        n_features,
+        allow_subset=False
+    ):
         """
-        Retorna sqrt(weights), verificando consistência.
+        Returns sqrt(weights) for the requested number of features.
+
+        Parameters
+        ----------
+        n_features : int
+            Number of variables that will be normalized.
+
+        allow_subset : bool, default=False
+            If False, the number of weights must exactly match
+            n_features.
+
+            If True, the first n_features weights may be used.
+            This is required when projecting only the first variables
+            of a model trained with additional label columns.
         """
 
         if self.weights is None:
-            return np.ones(n_features, dtype=float)
+            return np.ones(
+                n_features,
+                dtype=float
+            )
 
         weights = np.asarray(
             self.weights,
             dtype=float
         ).reshape(-1)
 
-        if len(weights) != n_features:
-            raise ValueError(
-                "Número incorreto de pesos. "
-                f"Foram fornecidos {len(weights)} pesos "
-                f"para {n_features} variáveis."
-            )
-
+        # Validate all supplied weights
         if np.any(~np.isfinite(weights)):
             raise ValueError(
                 "Todos os pesos devem ser valores finitos."
@@ -207,7 +237,40 @@ class WeightedVarianceNormalizer(VarianceNormalizer):
                 "Todos os pesos devem ser maiores que zero."
             )
 
-        return np.sqrt(weights)
+        # --------------------------------------------------
+        # EXACT MATCH
+        # Used during normal training
+        # --------------------------------------------------
+
+        if len(weights) == n_features:
+
+            selected_weights = weights
+
+        # --------------------------------------------------
+        # PREFIX SUBSET
+        # Used when projecting fewer variables
+        # --------------------------------------------------
+
+        elif (
+            allow_subset
+            and n_features < len(weights)
+        ):
+
+            selected_weights = weights[
+                :n_features
+            ]
+
+        else:
+
+            raise ValueError(
+                "Número incorreto de pesos. "
+                f"Foram fornecidos {len(weights)} pesos "
+                f"e são necessárias {n_features} variáveis."
+            )
+
+        return np.sqrt(
+            selected_weights
+        )
 
     def normalize(self, data):
 
@@ -277,7 +340,8 @@ class WeightedVarianceNormalizer(VarianceNormalizer):
         normalized = (data - me) / st
 
         factors = self._get_weight_factors(
-            len(me)
+            len(me),
+            allow_subset=True
         )
 
         weighted = normalized * factors
@@ -324,7 +388,8 @@ class WeightedVarianceNormalizer(VarianceNormalizer):
         st[st == 0] = 1
 
         factors = self._get_weight_factors(
-            len(me)
+            len(me),
+            allow_subset=True
         )
 
         # Primeiro remove os pesos
