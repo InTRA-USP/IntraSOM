@@ -9,6 +9,7 @@ from matplotlib import pyplot as plt
 import matplotlib as mpl
 import matplotlib.gridspec as gridspec
 from matplotlib.patches import RegularPolygon
+from matplotlib.collections import PolyCollection
 
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import minmax_scale
@@ -38,9 +39,370 @@ class ClusterFactory(object):
         self.neurons_dataframe = som_object.neurons_dataframe
         self.sample_names = som_object._sample_names
         self.build_umatrix = som_object.build_umatrix
-        # Load foot image
-        image_file = resources.files("intrasom") / "images" / "foot.jpg"
-        self.foot = Image.open(image_file)
+
+        # Match visualization.PlotFactory conventions.
+        self.mapsize = tuple(int(v) for v in self.mapsize)
+        if len(self.mapsize) != 2:
+            raise ValueError(
+                "mapsize must contain exactly two values: (columns, rows)."
+            )
+
+        self.cols, self.rows = self.mapsize
+        self.lattice = getattr(som_object, "lattice", "hexa")
+        self.mapshape = getattr(som_object, "mapshape", "planar")
+
+        if self.lattice not in {"hexa", "rect"}:
+            raise ValueError(
+                f"Unsupported lattice {self.lattice!r}. "
+                "Accepted values are 'hexa' and 'rect'."
+            )
+
+        if self.mapshape not in {"planar", "toroid"}:
+            raise ValueError(
+                f"Unsupported mapshape {self.mapshape!r}. "
+                "Accepted values are 'planar' and 'toroid'."
+            )
+
+        if self.codebook.shape[0] != self.cols * self.rows:
+            raise ValueError(
+                "The codebook number of neurons is inconsistent with mapsize. "
+                f"codebook={self.codebook.shape[0]}, "
+                f"mapsize={self.mapsize} -> {self.cols * self.rows} neurons."
+            )
+
+        self._geometry_cache = {}
+
+        # Load watermark without making plotting fail if the asset is absent.
+        self.foot = None
+        try:
+            image_file = resources.files("intrasom") / "images" / "foot.jpg"
+            with Image.open(image_file) as img:
+                self.foot = img.copy()
+        except Exception:
+            self.foot = None
+
+
+    # ------------------------------------------------------------------
+    # GEOMETRY HELPERS
+    # ------------------------------------------------------------------
+
+    def _node_coordinates(self):
+        """Return node coordinates with shape ``(rows, columns)``."""
+        cache_key = ("node_coordinates", self.lattice, self.cols, self.rows)
+
+        if cache_key in self._geometry_cache:
+            return self._geometry_cache[cache_key]
+
+        if self.lattice == "hexa":
+            coordinates = self.generate_hex_lattice(self.cols, self.rows)
+        else:
+            coordinates = self.generate_rec_lattice(self.cols, self.rows)
+
+        xx = coordinates[:, 0].reshape(self.rows, self.cols)
+        yy = coordinates[:, 1].reshape(self.rows, self.cols)
+
+        self._geometry_cache[cache_key] = (xx, yy)
+        return xx, yy
+
+    @staticmethod
+    def _safe_norm(values):
+        """Build a valid Matplotlib normalization, including constant arrays."""
+        values = np.asarray(values, dtype=float)
+        finite = values[np.isfinite(values)]
+
+        if finite.size == 0:
+            return mpl.colors.Normalize(vmin=0.0, vmax=1.0)
+
+        vmin = float(np.min(finite))
+        vmax = float(np.max(finite))
+
+        if np.isclose(vmin, vmax):
+            pad = 0.5 if np.isclose(vmin, 0.0) else abs(vmin) * 0.01
+            if np.isclose(pad, 0.0):
+                pad = 0.5
+            vmin -= pad
+            vmax += pad
+
+        return mpl.colors.Normalize(vmin=vmin, vmax=vmax)
+
+    @staticmethod
+    def _polygon_vertices(centers, lattice, sizes=1.0):
+        """Generate hexagonal or rectangular cell vertices vectorially."""
+        centers = np.asarray(centers, dtype=float).reshape(-1, 2)
+        n = centers.shape[0]
+
+        sizes = np.asarray(sizes, dtype=float)
+        if sizes.ndim == 0:
+            sizes = np.full(n, float(sizes), dtype=float)
+        else:
+            sizes = np.broadcast_to(sizes.reshape(-1), (n,)).astype(float)
+
+        if lattice == "hexa":
+            angles = (
+                np.pi / 2.0
+                + np.arange(6, dtype=float) * (2.0 * np.pi / 6.0)
+            )
+            radius = (1.0 / np.sqrt(3.0)) * sizes
+            offsets = np.stack(
+                [np.cos(angles), np.sin(angles)],
+                axis=1,
+            )
+            return (
+                centers[:, None, :]
+                + radius[:, None, None] * offsets[None, :, :]
+            )
+
+        half = 0.5 * sizes
+        base = np.array(
+            [
+                [-1.0, -1.0],
+                [1.0, -1.0],
+                [1.0, 1.0],
+                [-1.0, 1.0],
+            ],
+            dtype=float,
+        )
+        return (
+            centers[:, None, :]
+            + half[:, None, None] * base[None, :, :]
+        )
+
+    def _add_value_cells(
+        self,
+        ax,
+        centers,
+        values,
+        *,
+        cmap,
+        norm,
+        lattice=None,
+        sizes=1.0,
+        edgecolors="none",
+        linewidths=0.0,
+        alpha=1.0,
+        zorder=1,
+    ):
+        lattice = self.lattice if lattice is None else lattice
+        centers = np.asarray(centers, dtype=float).reshape(-1, 2)
+        values = np.asarray(values, dtype=float).reshape(-1)
+
+        if centers.shape[0] != values.size:
+            raise ValueError(
+                "centers and values must contain the same number of cells."
+            )
+
+        valid = np.isfinite(values)
+        if not np.any(valid):
+            return None
+
+        centers = centers[valid]
+        values = values[valid]
+
+        if np.ndim(sizes) == 0:
+            filtered_sizes = sizes
+        else:
+            filtered_sizes = np.asarray(sizes).reshape(-1)[valid]
+
+        vertices = self._polygon_vertices(
+            centers,
+            lattice,
+            filtered_sizes,
+        )
+
+        collection = PolyCollection(
+            vertices,
+            cmap=cmap,
+            norm=norm,
+            edgecolors=edgecolors,
+            linewidths=linewidths,
+            alpha=alpha,
+            zorder=zorder,
+        )
+        collection.set_array(values)
+        ax.add_collection(collection)
+        return collection
+
+    def _add_solid_cells(
+        self,
+        ax,
+        centers,
+        *,
+        facecolors,
+        edgecolors=None,
+        linewidths=0.0,
+        alpha=1.0,
+        sizes=1.0,
+        lattice=None,
+        zorder=3,
+    ):
+        lattice = self.lattice if lattice is None else lattice
+        centers = np.asarray(centers, dtype=float).reshape(-1, 2)
+
+        if centers.size == 0:
+            return None
+
+        vertices = self._polygon_vertices(
+            centers,
+            lattice,
+            sizes,
+        )
+
+        if edgecolors is None:
+            edgecolors = facecolors
+
+        collection = PolyCollection(
+            vertices,
+            facecolors=facecolors,
+            edgecolors=edgecolors,
+            linewidths=linewidths,
+            alpha=alpha,
+            zorder=zorder,
+        )
+        ax.add_collection(collection)
+        return collection
+
+    def _set_map_limits(self, ax, centers, *, pad=0.75, invert_y=True):
+        centers = np.asarray(centers, dtype=float).reshape(-1, 2)
+
+        if centers.size == 0:
+            return
+
+        xmin = float(np.nanmin(centers[:, 0])) - pad
+        xmax = float(np.nanmax(centers[:, 0])) + pad
+        ymin = float(np.nanmin(centers[:, 1])) - pad
+        ymax = float(np.nanmax(centers[:, 1])) + pad
+
+        ax.set_xlim(xmin, xmax)
+        if invert_y:
+            ax.set_ylim(ymax, ymin)
+        else:
+            ax.set_ylim(ymin, ymax)
+
+        ax.set_aspect("equal", adjustable="box")
+        ax.set_axis_off()
+
+    def _umatrix_geometry(
+        self,
+        um,
+        umat,
+        *,
+        include_toroid_wrap=False,
+    ):
+        """Use the same flat U-Matrix geometry as ``visualization.PlotFactory``."""
+        um = np.asarray(um, dtype=float)
+        umat = np.asarray(umat, dtype=float)
+
+        if umat.shape != (self.rows, self.cols):
+            raise ValueError(
+                "Reduced U-Matrix has an invalid shape. "
+                f"Received {umat.shape}, expected {(self.rows, self.cols)}."
+            )
+
+        expected_neighbors = 6 if self.lattice == "hexa" else 8
+        expected_um = (self.rows, self.cols, expected_neighbors)
+
+        if um.shape != expected_um:
+            raise ValueError(
+                "Expanded U-Matrix has an invalid shape. "
+                f"Received {um.shape}, expected {expected_um}."
+            )
+
+        xx, yy = self._node_coordinates()
+        node_centers = np.column_stack(
+            [(2.0 * xx).ravel(), (2.0 * yy).ravel()]
+        )
+        node_values = umat.ravel()
+
+        row_grid, col_grid = np.indices(
+            (self.rows, self.cols),
+            dtype=int,
+        )
+
+        if self.lattice == "hexa":
+            offsets = np.array(
+                [
+                    [1.0, 0.0],
+                    [0.5, np.sqrt(3.0) / 2.0],
+                    [-0.5, np.sqrt(3.0) / 2.0],
+                ],
+                dtype=float,
+            )
+            neighbor_slots = (0, 1, 2)
+            even_rows = (row_grid % 2) == 0
+            neighbor_steps = (
+                (np.ones_like(col_grid), np.zeros_like(row_grid)),
+                (
+                    np.where(even_rows, 0, 1),
+                    np.ones_like(row_grid),
+                ),
+                (
+                    np.where(even_rows, -1, 0),
+                    np.ones_like(row_grid),
+                ),
+            )
+        else:
+            offsets = np.array(
+                [
+                    [1.0, 0.0],
+                    [1.0, 1.0],
+                    [0.0, 1.0],
+                    [-1.0, 1.0],
+                ],
+                dtype=float,
+            )
+            neighbor_slots = (0, 1, 2, 3)
+            neighbor_steps = (
+                (np.ones_like(col_grid), np.zeros_like(row_grid)),
+                (np.ones_like(col_grid), np.ones_like(row_grid)),
+                (np.zeros_like(col_grid), np.ones_like(row_grid)),
+                (-np.ones_like(col_grid), np.ones_like(row_grid)),
+            )
+
+        edge_centers = []
+        edge_values = []
+
+        for offset, slot, (step_x, step_y) in zip(
+            offsets,
+            neighbor_slots,
+            neighbor_steps,
+        ):
+            values = np.array(um[:, :, slot], dtype=float, copy=True)
+
+            if self.mapshape == "toroid" and not include_toroid_wrap:
+                neighbor_rows = row_grid + step_y
+                neighbor_cols = col_grid + step_x
+                inside = (
+                    (neighbor_rows >= 0)
+                    & (neighbor_rows < self.rows)
+                    & (neighbor_cols >= 0)
+                    & (neighbor_cols < self.cols)
+                )
+                values[~inside] = np.nan
+
+            edge_centers.append(node_centers + offset)
+            edge_values.append(values.ravel())
+
+        return (
+            node_centers,
+            node_values,
+            np.vstack(edge_centers),
+            np.concatenate(edge_values),
+        )
+
+    def _add_watermark_subplot(
+        self,
+        fig,
+        gs,
+        grid_slice=(slice(95, 100), slice(0, 20)),
+    ):
+        if self.foot is None:
+            return None
+
+        ax = fig.add_subplot(gs[grid_slice], zorder=-1)
+        ax.imshow(self.foot, aspect="equal", alpha=1)
+        ax.axis("off")
+        return ax
+
 
     def kmeans(self, k=3, init = "random", n_init=5, max_iter=200):
         """
@@ -532,608 +894,635 @@ class ClusterFactory(object):
         return int(selected)
 
             
-    def plot_kmeans(self, 
-                    clusters, 
-                    figsize = (16,14),
-                    title_size = 25,
-                    title_pad = 40,
-                    legend_title = False,
-                    legend_text_size = 10,
-                    save = False,
-                    file_name = None,
-                    file_path = False,
-                    watermark_neurons = False, 
-                    neurons_fontsize = 12,
-                    umatrix = False, 
-                    hits=False, 
-                    alfa_clust = 0.5, 
-                    log=False,
-                    colormap = "gist_rainbow",
-                    clusters_highlight = [],
-                    legend_title_size=12,
-                    cluster_outline=False,
-                    plot_labels=False,
-                    custom_labels = [],
-                    clusterout_maxtext_size=12,
-                    return_geodataframe=False,
-                    auto_adjust_text =False):
+    def plot_kmeans(
+        self,
+        clusters,
+        figsize=(16, 14),
+        title_size=25,
+        title_pad=40,
+        legend_title=False,
+        legend_text_size=10,
+        save=False,
+        file_name=None,
+        file_path=False,
+        watermark_neurons=False,
+        neurons_fontsize=12,
+        umatrix=False,
+        hits=False,
+        alfa_clust=0.5,
+        log=False,
+        colormap="gist_rainbow",
+        clusters_highlight=None,
+        legend_title_size=12,
+        cluster_outline=False,
+        plot_labels=False,
+        custom_labels=None,
+        clusterout_maxtext_size=12,
+        return_geodataframe=False,
+        auto_adjust_text=False,
+    ):
         """
-        Plots a graph with the clusters resulting from the execution of the K-means algorithm.
+        Plot K-means clusters using the same map geometry as ``PlotFactory``.
 
-        Parameters:
-        - clusters: ndarray or 2-dimensional list
-            Array or 2-dimensional list containing the clusters generated by the K-means algorithm.
-        - figsize: tuple, optional
-            Figure size (width, height). Default is (16, 14).
-        - title_size: int, optional
-            Font size of the title. Default is 25.
-        - title_pad: int, optional
-            Spacing between the title and the top of the graph. Default is 40.
-        - legend_text_size: int, optional
-            Font size of the legend text. Default is 10.
-        - save: bool, optional
-            Indicates whether the graph should be saved to a file. Default is False.
-        - file_name: str, optional
-            Name of the file to be saved. Default is None.
-        - file_path: bool, optional
-            Indicates whether the file path should be included when saving. Default is False.
-        - watermark_neurons: bool, optional
-            Indicates whether the BMU numbers should be displayed as a watermark on the graph. Default is False.
-        - neurons_fontsize: int, optional
-            Font size of the BMU numbers. Default is 12.
-        - umatrix: bool, optional
-            Indicates whether the U-matrix should be plotted on the graph. Default is False.
-        - hits: bool, optional
-            Indicates whether the hits should be plotted on the graph. Default is False.
-        - alfa_clust: float, optional
-            Transparency value of the clusters in the graph. Default is 0.5.
-        - log: bool, optional
-            Indicates whether the U-matrix should be plotted on a logarithmic scale. Default is False.
-        - colormap: str, optional
-            Name of the colormap to be used in the graph. Default is "gist_rainbow".
-        - clusters_highlight: list, optional
-            List containing the clusters that should be highlighted in the graph. Default is [].
-        - legend_title_size: int, optional
-            Font size of the legend title. Default is 12.
-        - cluster_outline: bool, optional
-            Indicates whether the cluster outlines should be drawn on the graph. Default is False.
-        - plot_labels: bool, optional
-            Indicates whether the labels should be plotted on the graph. Default is False.
-        - custom_labels: list, optional
-            List containing custom labels for each point on the graph. Default is [].
-        - clusterout_maxtext_size: int, optional
-            Maximum size of the cluster text on the graph. Default is 12.
-        - return_geodataframe: bool, optional
-            Indicates whether the GeoDataFrame should be returned. Default is False.
-        - auto_adjust_text: bool, optional
-            Indicates whether automatic text adjustment should be enabled. Default is False.
+        All historical visualization features are retained:
+        U-Matrix background, hits, neuron watermark, highlighted clusters,
+        dissolved/fused cluster polygons, labels, custom labels, legend,
+        saving and optional GeoDataFrame return.
         """
-        
+        clusters = np.asarray(clusters)
+        expected_shape = (self.rows, self.cols)
+
+        if clusters.shape != expected_shape:
+            if clusters.size == self.rows * self.cols:
+                clusters = clusters.reshape(expected_shape)
+            else:
+                raise ValueError(
+                    "clusters has an invalid shape. "
+                    f"Received {clusters.shape}, expected {expected_shape}."
+                )
+
+        if not np.issubdtype(clusters.dtype, np.number):
+            raise TypeError("clusters must contain numeric labels.")
+
+        if not np.all(np.isfinite(clusters)):
+            raise ValueError("clusters cannot contain NaN or infinite labels.")
+
+        clusters_highlight = (
+            []
+            if clusters_highlight is None
+            else list(clusters_highlight)
+        )
+        custom_labels = (
+            []
+            if custom_labels is None
+            else list(custom_labels)
+        )
+
+        unique_labels = np.sort(np.unique(clusters))
+        n_clusters = len(unique_labels)
 
         if file_name is None:
-            file_name = f"Clusters_{len(np.unique(clusters))}_{self.name}"
+            file_name = f"Clusters_{n_clusters}_{self.name}"
 
+        fig = plt.figure(figsize=figsize, dpi=300)
+        gs = gridspec.GridSpec(100, 100, figure=fig)
 
-        f = plt.figure(figsize=figsize, dpi=300)
-        gs = gridspec.GridSpec(100, 100)
-        
-        max_clust = clusters.max() if len(clusters_highlight) == 0 else len(clusters_highlight)
-        max_clust = max_clust+1 if watermark_neurons else max_clust
+        n_legend_items = (
+            n_clusters
+            if not clusters_highlight
+            else len(clusters_highlight)
+        )
+        n_legend_items += int(watermark_neurons)
 
         pad_subplots = 3
-        if max_clust <=10:
-            ax = f.add_subplot(gs[:95, :90-pad_subplots])
-        elif max_clust<=20:
-            ax = f.add_subplot(gs[:95, :80-pad_subplots])
-        elif max_clust<=30:
-            ax = f.add_subplot(gs[:95, :70-pad_subplots])
+        if n_legend_items <= 10:
+            map_end = 90 - pad_subplots
+            legend_start = 90
+        elif n_legend_items <= 20:
+            map_end = 80 - pad_subplots
+            legend_start = 80
+        elif n_legend_items <= 30:
+            map_end = 70 - pad_subplots
+            legend_start = 70
         else:
-            ax = f.add_subplot(gs[:95, :60-pad_subplots])
+            map_end = 60 - pad_subplots
+            legend_start = 60
 
-        ax.set_aspect('equal')
+        ax = fig.add_subplot(gs[:95, :map_end])
+        ax.set_aspect("equal")
 
-        xx = np.reshape(self.generate_hex_lattice(self.mapsize[0], self.mapsize[1])[:,0], (self.mapsize[1], self.mapsize[0]))
-        yy = np.reshape(self.generate_hex_lattice(self.mapsize[0], self.mapsize[1])[:,1], (self.mapsize[1], self.mapsize[0]))
+        xx, yy = self._node_coordinates()
+        node_centers = np.column_stack(
+            [(2.0 * xx).ravel(), (2.0 * yy).ravel()]
+        )
+
+        # --------------------------------------------------------------
+        # Optional U-Matrix background and hits
+        # --------------------------------------------------------------
+        all_centers_for_limits = [node_centers]
 
         if umatrix:
+            um = np.asarray(
+                self.build_umatrix(expanded=True, log=log),
+                dtype=float,
+            )
+            umat = np.asarray(
+                self.build_umatrix(expanded=False, log=log),
+                dtype=float,
+            )
+
+            (
+                umat_node_centers,
+                umat_node_values,
+                edge_centers,
+                edge_values,
+            ) = self._umatrix_geometry(
+                um,
+                umat,
+                include_toroid_wrap=False,
+            )
+
+            finite_values = np.concatenate(
+                [
+                    umat_node_values[np.isfinite(umat_node_values)],
+                    edge_values[np.isfinite(edge_values)],
+                ]
+            )
+            umat_norm = self._safe_norm(finite_values)
+            umat_cmap = mpl.colormaps["jet"]
+
+            self._add_value_cells(
+                ax,
+                umat_node_centers,
+                umat_node_values,
+                cmap=umat_cmap,
+                norm=umat_norm,
+                zorder=0,
+            )
+            self._add_value_cells(
+                ax,
+                edge_centers,
+                edge_values,
+                cmap=umat_cmap,
+                norm=umat_norm,
+                zorder=0,
+            )
+
+            finite_edge_centers = edge_centers[np.isfinite(edge_values)]
+            if finite_edge_centers.size:
+                all_centers_for_limits.append(finite_edge_centers)
+
             if hits:
-                bmu_dic = self.hits_dictionary
-            # U Matrix
-            um = self.build_umatrix(expanded = True, log=log)
-            umat = self.build_umatrix(expanded = False, log=log)
+                hit_sizes_dict = self.hits_dictionary
+                hit_nodes = np.array(
+                    sorted(hit_sizes_dict.keys()),
+                    dtype=int,
+                )
+                valid = (
+                    (hit_nodes >= 0)
+                    & (hit_nodes < node_centers.shape[0])
+                )
+                hit_nodes = hit_nodes[valid]
 
-            # Normalize the colors for all hexagons
-            norm = mpl.colors.Normalize(vmin=np.nanmin(um), vmax=np.nanmax(um))
-            counter = 0
+                if hit_nodes.size:
+                    self._add_solid_cells(
+                        ax,
+                        node_centers[hit_nodes],
+                        facecolors="white",
+                        edgecolors="lightgray",
+                        linewidths=0.4,
+                        sizes=np.array(
+                            [
+                                hit_sizes_dict[int(node)]
+                                for node in hit_nodes
+                            ],
+                            dtype=float,
+                        ),
+                        zorder=0.5,
+                    )
 
-            alfa = 1
-
-            for j in range(self.mapsize[1]):
-                for i in range(self.mapsize[0]):
-                    # Central Hexagon
-                    hexagon = RegularPolygon((xx[(j, i)]*2,
-                                          yy[(j,i)]*2),
-                                         numVertices=6,
-                                         radius=1/np.sqrt(3),
-                                         facecolor= mpl.colormaps["jet"](norm(umat[j][i])),
-                                         alpha=alfa, 
-                                         zorder=0)#, edgecolor='black')
-
-                    ax.add_patch(hexagon)
-
-                    # Right Hexagon
-                    if not np.isnan(um[j, i, 0]):
-                        hexagon = RegularPolygon((xx[(j, i)]*2+1,
-                                              yy[(j,i)]*2),
-                                             numVertices=6,
-                                             radius=1/np.sqrt(3),
-                                             facecolor=mpl.colormaps["jet"](norm(um[j,i,0])),
-                                             alpha=alfa, 
-                                             zorder=0)
-                        ax.add_patch(hexagon)
-
-                    # Upper Right Hexagon
-                    if not np.isnan(um[j, i, 1]):
-                        hexagon = RegularPolygon((xx[(j, i)]*2+0.5,
-                                              yy[(j,i)]*2+(np.sqrt(3)/2)),
-                                             numVertices=6,
-                                             radius=1/np.sqrt(3),
-                                             facecolor=mpl.colormaps["jet"](norm(um[j,i,1])),
-                                             alpha=alfa, 
-                                             zorder=0)
-                        ax.add_patch(hexagon)
-
-                    # Upper Left Hexagon
-                    if not np.isnan(um[j, i, 2]):
-                        hexagon = RegularPolygon((xx[(j, i)]*2-0.5,
-                                              yy[(j,i)]*2+(np.sqrt(3)/2)),
-                                             numVertices=6,
-                                             radius=1/np.sqrt(3),
-                                             facecolor=mpl.colormaps["jet"](norm(um[j,i,2])),
-                                             alpha=alfa, 
-                                             zorder=0)
-                        ax.add_patch(hexagon)
-
-                    # Plot hits
-                    if hits:
-                        try:
-                            hexagon = RegularPolygon((xx[(j, i)]*2,
-                                                  yy[(j,i)]*2),
-                                                 numVertices=6,
-                                                 radius=((1/np.sqrt(3))*bmu_dic[counter]),
-                                                 facecolor='white',
-                                                 alpha=alfa, 
-                                                 zorder=0)
-                            ax.add_patch(hexagon)
-                        except:
-                            pass
-                    counter+=1
-        
-        norm = mpl.colors.Normalize(vmin=np.nanmin(clusters), vmax=np.nanmax(clusters))
-
+        # --------------------------------------------------------------
+        # Cluster colors
+        # --------------------------------------------------------------
+        cluster_norm = self._safe_norm(unique_labels)
         cmap = mpl.colormaps.get_cmap(colormap)
+
+        def cluster_color(label):
+            if clusters_highlight and label not in clusters_highlight:
+                return "gray"
+            return cmap(cluster_norm(float(label)))
+
+        flat_labels = clusters.ravel()
+        facecolors = np.array(
+            [cluster_color(label) for label in flat_labels],
+            dtype=object,
+        )
+
+        gdf = None
+
+        # --------------------------------------------------------------
+        # Fused/dissolved cluster polygons
+        # --------------------------------------------------------------
         if cluster_outline:
-            cluster_vertices_dict = {}
+            # The historical plot used radius=2/sqrt(3)+0.04. Convert that
+            # exactly to the common ``sizes`` convention.
+            outline_size = 2.0 + 0.04 * np.sqrt(3.0)
+            vertices = self._polygon_vertices(
+                node_centers,
+                self.lattice,
+                sizes=outline_size,
+            )
 
-            for j in range(clusters.shape[0]):
-                for i in range(clusters.shape[1]):
+            polygons_by_label = {
+                label: []
+                for label in unique_labels
+            }
 
-                    label = clusters[j][i]
+            for label, verts in zip(flat_labels, vertices):
+                polygons_by_label[label].append(Polygon(verts))
 
-                    if len(clusters_highlight) == 0:
-                        color = cmap(norm(clusters[j][i]))
-                    else:   
-                        color = "gray" if clusters[j][i] not in clusters_highlight else cmap(norm(clusters[j][i]))
+            records = []
+            for position, label in enumerate(unique_labels):
+                dissolved = unary_union(polygons_by_label[label])
 
-                    if label not in cluster_vertices_dict:
-                        cluster_vertices_dict[label] = []
-                    
-                    # Get the vertices of the hexagon
-                    hexagon = RegularPolygon((xx[(j, i)]*2, yy[(j,i)]*2), 
-                                        numVertices=6, 
-                                        radius=2/np.sqrt(3)+0.04,
-                                        facecolor = color, 
-                                        alpha = alfa_clust)
-                    vertices = hexagon.get_verts()
-                    polygon = Polygon(vertices)
-                    cluster_vertices_dict[label].append(polygon)
+                # Preserve the original inward buffer used to create a clean,
+                # visible separation between neighboring fused groups.
+                dissolved = dissolved.buffer(-0.075)
 
-                    if watermark_neurons:
-                        # For use in BMUs number plot
-                        nnodes = self.mapsize[0] * self.mapsize[1]
-                        grid_bmus = np.linspace(1,nnodes, nnodes).reshape(self.mapsize[1], self.mapsize[0])
-                        # Central Hexagon
-                        hexagon = RegularPolygon((xx[(j, i)]*2,
-                                                yy[(j,i)]*2),
-                                                numVertices=6,
-                                                radius=2/np.sqrt(3),
-                                                facecolor= "white",
-                                                edgecolor='black',
-                                                alpha=0.1, 
-                                                zorder=2)#, edgecolor='black')
-                        ax.add_patch(hexagon)
+                if dissolved.is_empty:
+                    dissolved = unary_union(polygons_by_label[label])
 
-                        ax.text(xx[(j,i)]*2, yy[(j,i)]*2, 
-                                s=f"{int(grid_bmus[j,i])}", 
-                                size = neurons_fontsize,
-                                horizontalalignment='center', 
-                                verticalalignment='center', 
-                                color='black', 
-                                zorder=2)
-        else:
-            for j in range(clusters.shape[0]):
-                for i in range(clusters.shape[1]):
-
-                    if len(clusters_highlight) == 0:
-                        color = cmap(norm(clusters[j][i]))
-                    else:
-                        color = "gray" if clusters[j][i] not in clusters_highlight else cmap(norm(clusters[j][i]))
-
-                    hexagon = RegularPolygon((xx[(j, i)]*2, yy[(j,i)]*2), 
-                                        numVertices=6, 
-                                        radius=2/np.sqrt(3)-0.04*(2/np.sqrt(3)),
-                                        facecolor = color, 
-                                        alpha = alfa_clust, 
-                                         zorder=1)
-                    ax.add_patch(hexagon)                
-                    
-                    hexagon = RegularPolygon((xx[(j, i)]*2, yy[(j,i)]*2), 
-                                        numVertices=6, 
-                                        radius=2/np.sqrt(3)-0.04*(2/np.sqrt(3)),
-                                        fill=False,
-                                        facecolor = None, 
-                                        edgecolor = color,
-                                        linewidth=1.9, 
-                                        alpha = 1, 
-                                        zorder = 1)
-                    ax.add_patch(hexagon)
-                
-                    if watermark_neurons:
-                        # For use in neurons number plot
-                        nnodes = self.mapsize[0] * self.mapsize[1]
-                        grid_bmus = np.linspace(1,nnodes, nnodes).reshape(self.mapsize[1], self.mapsize[0])
-                        # Central Hexagon
-                        hexagon = RegularPolygon((xx[(j, i)]*2,
-                                                yy[(j,i)]*2),
-                                                numVertices=6,
-                                                radius=2/np.sqrt(3),
-                                                facecolor= "white",
-                                                edgecolor='black',
-                                                alpha=0.1, 
-                                                zorder=2)#, edgecolor='black')
-                        ax.add_patch(hexagon)
-
-                        ax.text(xx[(j,i)]*2, yy[(j,i)]*2, 
-                                s=f"{int(grid_bmus[j,i])}", 
-                                size = neurons_fontsize,
-                                horizontalalignment='center', 
-                                verticalalignment='center', 
-                                color='black', 
-                                zorder=2)
-
-        if cluster_outline:
-            cluster_vertices_dict = dict(sorted(cluster_vertices_dict.items()))
-
-            # Create a list of GeoSeries for each cluster
-            cluster_geo_series = []
-            for label in cluster_vertices_dict:
-                cluster_geo_series.append(gpd.GeoSeries(cluster_vertices_dict[label]))
-
-            # Dissolve the polygons in each GeoSeries
-            dissolved_geometries = []
-            for geo_series in cluster_geo_series:
-                dissolved_geometry = unary_union(geo_series)
-                dissolved_geometries.append(dissolved_geometry)
-
-            # Colors of the clusters
-            colors = []
-            labels_default = []
-            cluster = []
-            for i in range(len(dissolved_geometries)):
-                label = i+1
-                if len(clusters_highlight) == 0:
-                    color = cmap(norm(label))
+                if custom_labels:
+                    if len(custom_labels) != n_clusters:
+                        raise ValueError(
+                            "custom_labels must contain one label for each "
+                            f"cluster ({n_clusters})."
+                        )
+                    display_label = custom_labels[position]
                 else:
-                    color = "gray" if label not in clusters_highlight else cmap(norm(label))
-                
-                colors.append(color)
-                labels_default.append(f"#{label}")
-                cluster.append(label)
+                    display_label = f"#{label:g}"
 
-            # Create a GeoDataFrame from the list of geometries
-            gdf = gpd.GeoDataFrame(geometry=[geom for geom in dissolved_geometries])
+                records.append(
+                    {
+                        "geometry": dissolved,
+                        "color": cluster_color(label),
+                        "label": display_label,
+                        "cluster": label,
+                    }
+                )
 
-            # Buffer inside to plot the outline
-            gdf["geometry"] = gdf.buffer(-0.075)
+            gdf = gpd.GeoDataFrame(records, geometry="geometry")
+            gdf = gdf.explode(index_parts=False).reset_index(drop=True)
 
-            # Add a new column to the GeoDataFrame with the colors
-            gdf['color'] = colors
-            gdf['label'] = labels_default
-            gdf['cluster'] = cluster
+            gdf.plot(
+                ax=ax,
+                facecolor=gdf["color"],
+                edgecolor="none",
+                alpha=alfa_clust,
+                zorder=1,
+            )
+            gdf.plot(
+                ax=ax,
+                facecolor="none",
+                edgecolor=gdf["color"],
+                alpha=1,
+                linewidth=2,
+                zorder=1.1,
+            )
 
-            if len(custom_labels)>0:
-                gdf['label'] = custom_labels
-
-            gdf = gdf.explode()
-
-            # Plot the geometry
-            gdf.plot(ax=ax, 
-                     facecolor=gdf['color'], 
-                     edgecolor='none', 
-                     alpha=alfa_clust,
-                     zorder=1)
-            gdf.plot(ax=ax, 
-                     facecolor='none', 
-                     edgecolor=gdf['color'], 
-                     alpha=1, 
-                     linewidth=2, 
-                     zorder=1)
             if plot_labels:
-                # Iterate over each polygon in the GeoDataFrame
-                for idx, row in gdf.iterrows():
-                    
-                    if len(clusters_highlight)!=0:
-                        if row["cluster"] not in clusters_highlight:
-                            continue
-                    
+                for _, row in gdf.iterrows():
+                    if (
+                        clusters_highlight
+                        and row["cluster"] not in clusters_highlight
+                    ):
+                        continue
+
+                    polygon = row.geometry
+                    label = str(row["label"])
+
+                    if polygon.is_empty:
+                        continue
+
                     if auto_adjust_text:
-                    
-                        polygon = row['geometry']
-                        label = row['label']
-                        
-                        # calculate the minimum bounding box of the polygon
-                        mbb = Polygon(polygon.exterior).minimum_rotated_rectangle
+                        rectangle = polygon.minimum_rotated_rectangle
+                        coords = list(rectangle.exterior.coords)
 
-                        # Get the minimum rotated rectangle of the bounding box
-                        rotated_rect = mbb.minimum_rotated_rectangle
+                        edge_lengths = [
+                            Point(coords[i]).distance(Point(coords[i + 1]))
+                            for i in range(4)
+                        ]
+                        major_index = int(np.argmax(edge_lengths))
+                        p0 = coords[major_index]
+                        p1 = coords[major_index + 1]
+                        angle = np.degrees(
+                            np.arctan2(
+                                p1[1] - p0[1],
+                                p1[0] - p0[0],
+                            )
+                        )
+                        if angle > 90:
+                            angle -= 180
+                        elif angle < -90:
+                            angle += 180
 
-                        # Get the angle of the major axis of the minimum rotated rectangle
-                        angle = np.rad2deg(np.arctan2(rotated_rect.bounds[3]-rotated_rect.bounds[1],
-                                                      rotated_rect.bounds[2]-rotated_rect.bounds[0]))
+                        point = polygon.representative_point()
+                        minx, miny, maxx, maxy = rectangle.bounds
+                        available = max(
+                            min(maxx - minx, maxy - miny),
+                            1e-6,
+                        )
+                        estimated_text_width = max(
+                            len(label) * 0.6,
+                            1.0,
+                        )
+                        fontsize = min(
+                            clusterout_maxtext_size,
+                            max(
+                                4.0,
+                                clusterout_maxtext_size
+                                * available
+                                / estimated_text_width,
+                            ),
+                        )
 
-                        x, y = mbb.representative_point().coords[0]
-                        ax.plot(*mbb.exterior.xy, color="red")
-                        mbb_coords = mbb.exterior.coords
-                        
-                        # calculate the aspect ratio of the MBB
-                        mbb_width = Point(mbb_coords[0]).distance(Point(mbb_coords[1]))
-                        mbb_height = Point(mbb_coords[1]).distance(Point(mbb_coords[2]))
-
-                        if mbb_width<mbb_height:
-                            save_wid = mbb_width
-                            mbb_width = mbb_height
-                            mbb_height = save_wid
-                        
-                        plt.ioff()
-                        # calculate the aspect ratio of the label text
-                        label_width, label_height = ax.text(0, 0, label, ha='left', va='bottom', fontsize=clusterout_maxtext_size).get_window_extent().size
-                        plt.ion()
-
-                        # scale the label text to fit inside the MBB
-                        if label_width>mbb_width:
-                            scale_factor = mbb_width/label_width
-                        else:
-                            scale_factor = 1
-
-                        fontsize = clusterout_maxtext_size * scale_factor*10
-                        
-                        
-                        ax.text(x, 
-                                y, 
-                                label, 
-                                ha='center', 
-                                va='center', 
-                                fontsize=fontsize, 
-                                rotation=angle, 
-                                color='white', 
-                                weight='bold')
+                        ax.text(
+                            point.x,
+                            point.y,
+                            label,
+                            ha="center",
+                            va="center",
+                            fontsize=fontsize,
+                            rotation=angle,
+                            color="white",
+                            weight="bold",
+                            zorder=3,
+                        )
                     else:
-                        # Get the centroid of the polygon
-                        centroid = row.geometry.centroid
-                        
-                        # Get the label
-                        label = row['label']
-                        
-                        # Create a text object with the label
-                        ax.text(x=centroid.x+0.05, 
-                                y=centroid.y+0.05, 
-                                s=label, 
-                                ha='center', 
-                                va='center', 
-                                color='black', 
-                                alpha=0.7, 
-                                weight='bold', 
-                                fontsize=clusterout_maxtext_size)
-                        
-                        ax.text(x=centroid.x, 
-                                y=centroid.y, 
-                                s=label, 
-                                ha='center', 
-                                va='center', 
-                                color="white", 
-                                weight='bold', 
-                                fontsize=clusterout_maxtext_size)
-                        
+                        point = polygon.representative_point()
+                        ax.text(
+                            point.x + 0.05,
+                            point.y + 0.05,
+                            label,
+                            ha="center",
+                            va="center",
+                            color="black",
+                            alpha=0.7,
+                            weight="bold",
+                            fontsize=clusterout_maxtext_size,
+                            zorder=3,
+                        )
+                        ax.text(
+                            point.x,
+                            point.y,
+                            label,
+                            ha="center",
+                            va="center",
+                            color="white",
+                            weight="bold",
+                            fontsize=clusterout_maxtext_size,
+                            zorder=3.1,
+                        )
 
-
-        # Plotting Parameters
-        ax.set_xlim(-0.6-0.5, 2*self.mapsize[0]-0.5+0.6)
-        ax.set_ylim(-0.5660254-0.81, 2*self.mapsize[1]*0.8660254-2*0.560254+0.75)
-        ax.set_axis_off()
-        ax.invert_yaxis()
-
-        plt.title(f"Clustering Matrix - {clusters.max()} clusters",
-                  horizontalalignment='center',  
-                  verticalalignment='top', 
-                  size=title_size, 
-                  pad=title_pad)
-        
-        if max_clust <=10:
-            ax2 = f.add_subplot(gs[20:80, 90:])
-        elif max_clust<=20:
-            ax2 = f.add_subplot(gs[20:80, 80:])
-        elif max_clust<=30:
-            ax2 = f.add_subplot(gs[20:80, 70:])
+        # --------------------------------------------------------------
+        # Individual cluster cells
+        # --------------------------------------------------------------
         else:
-            ax2 = f.add_subplot(gs[20:80, 60:])
-        
-        
+            cluster_size = 2.0 * 0.96
+            self._add_solid_cells(
+                ax,
+                node_centers,
+                facecolors=facecolors,
+                edgecolors=facecolors,
+                linewidths=1.9,
+                alpha=alfa_clust,
+                sizes=cluster_size,
+                zorder=1,
+            )
+
+        # --------------------------------------------------------------
+        # Neuron watermark
+        # --------------------------------------------------------------
+        if watermark_neurons:
+            self._add_solid_cells(
+                ax,
+                node_centers,
+                facecolors="white",
+                edgecolors="black",
+                linewidths=0.6,
+                alpha=0.1,
+                sizes=2.0,
+                zorder=2,
+            )
+
+            for node_id, (x, y) in enumerate(node_centers, start=1):
+                ax.text(
+                    x,
+                    y,
+                    str(node_id),
+                    size=neurons_fontsize,
+                    ha="center",
+                    va="center",
+                    color="black",
+                    zorder=2.1,
+                )
+
+        all_centers = np.vstack(all_centers_for_limits)
+        map_pad = 1.1
+        if watermark_neurons:
+            map_pad = max(map_pad, 1.4)
+
+        self._set_map_limits(
+            ax,
+            all_centers,
+            pad=map_pad,
+            invert_y=True,
+        )
+
+        ax.set_title(
+            f"Clustering Matrix - {n_clusters} clusters",
+            ha="center",
+            va="top",
+            size=title_size,
+            pad=title_pad,
+        )
+
+        # --------------------------------------------------------------
+        # Legend
+        # --------------------------------------------------------------
+        ax2 = fig.add_subplot(gs[20:80, legend_start:])
         ax2.invert_yaxis()
-        ax2.set_aspect('equal')
+        ax2.set_aspect("equal")
 
-        n_cols = int(np.ceil(max_clust/10))
-        n_rows = int(np.ceil(max_clust / n_cols))
+        legend_labels = (
+            unique_labels.tolist()
+            if not clusters_highlight
+            else [
+                label
+                for label in clusters_highlight
+                if label in set(unique_labels.tolist())
+            ]
+        )
 
-        hex_height = 0.096
-        pad = (0.1-hex_height)
-        radius =  hex_height/2
-        total_height = hex_height * n_rows + n_rows * pad
-        shift = hex_height
-        y_start = ((1 - total_height) / 2)+shift/2
-        x_start = pad+shift/2
-        text_pad = hex_height*3
+        n_items = len(legend_labels) + int(watermark_neurons)
+        n_cols = max(1, int(np.ceil(n_items / 10)))
+        n_rows = max(1, int(np.ceil(n_items / n_cols)))
 
-        condition = max_clust-1 if watermark_neurons else max_clust
+        cell_height = 0.096
+        pad = 0.1 - cell_height
+        radius = cell_height / 2
+        total_height = cell_height * n_rows + n_rows * pad
+        shift = cell_height
+        y_start = ((1 - total_height) / 2) + shift / 2
+        x_start = pad + shift / 2
+        text_pad = cell_height * 3
 
-        for i, (xfac, yfac) in enumerate(np.ndindex((n_cols, n_rows))):
-            if i+1 <= condition:
-                cluster = i+1 if len(clusters_highlight) == 0 else clusters_highlight[i]
-                x_center = x_start+(xfac)*shift+xfac*pad+xfac*text_pad
-                y_center = y_start+(yfac)*shift+yfac*pad
+        legend_entries = [
+            ("cluster", label)
+            for label in legend_labels
+        ]
+        if watermark_neurons:
+            legend_entries.append(("neuron", None))
 
-                if len(clusters_highlight) == 0:
-                    color = cmap(norm(cluster))
+        label_to_position = {
+            label: pos
+            for pos, label in enumerate(unique_labels)
+        }
+
+        for i, (entry_type, label) in enumerate(legend_entries):
+            xfac = i // n_rows
+            yfac = i % n_rows
+
+            x_center = (
+                x_start
+                + xfac * shift
+                + xfac * pad
+                + xfac * text_pad
+            )
+            y_center = y_start + yfac * shift + yfac * pad
+
+            if entry_type == "cluster":
+                color = cluster_color(label)
+                marker = RegularPolygon(
+                    (x_center, y_center),
+                    numVertices=6 if self.lattice == "hexa" else 4,
+                    radius=radius,
+                    orientation=0 if self.lattice == "hexa" else np.pi / 4,
+                    facecolor=color,
+                    edgecolor=color,
+                    linewidth=2,
+                    alpha=alfa_clust,
+                )
+                ax2.add_patch(marker)
+
+                if custom_labels:
+                    cluster_name = custom_labels[
+                        label_to_position[label]
+                    ]
                 else:
-                    color = "gray" if cluster not in clusters_highlight else cmap(norm(cluster))
+                    cluster_name = f"Cluster #{label:g}"
 
-                hex_points = RegularPolygon((x_center, y_center), 
-                                            numVertices=6, 
-                                            radius=radius,
-                                            facecolor=color, 
-                                            edgecolor=None, 
-                                            alpha=alfa_clust)
-                ax2.add_patch(hex_points)
-
-                hex_points = RegularPolygon((x_center, y_center), 
-                                            numVertices=6, 
-                                            radius=radius-radius*0.05,
-                                            facecolor=None,
-                                            fill=False, 
-                                            edgecolor=color,
-                                            linewidth=2)
-                ax2.add_patch(hex_points)
-                if len(custom_labels)>0:
-                    cluster_name = custom_labels[cluster-1]
-                else:
-                    cluster_name = f"Cluster #{cluster}"
-                ax2.annotate(cluster_name,
-                            xy=(x_center+radius+0.01, y_center),
-                            xytext=(0, 0),
-                            textcoords="offset points",
-                            color='black',
-                            weight='bold',
-                            fontsize=legend_text_size,
-                            ha='left',
-                            va='center')
+                ax2.annotate(
+                    cluster_name,
+                    xy=(x_center + radius + 0.01, y_center),
+                    xytext=(0, 0),
+                    textcoords="offset points",
+                    color="black",
+                    weight="bold",
+                    fontsize=legend_text_size,
+                    ha="left",
+                    va="center",
+                )
             else:
-                if watermark_neurons:
-                    x_center = x_start+(xfac)*shift+xfac*pad+xfac*text_pad
-                    y_center = y_start+(yfac)*shift+yfac*pad
+                marker = RegularPolygon(
+                    (x_center, y_center),
+                    numVertices=6 if self.lattice == "hexa" else 4,
+                    radius=radius * 0.95,
+                    orientation=0 if self.lattice == "hexa" else np.pi / 4,
+                    facecolor="white",
+                    edgecolor="black",
+                    linewidth=2,
+                )
+                ax2.add_patch(marker)
+                ax2.annotate(
+                    "#",
+                    xy=(x_center, y_center),
+                    xytext=(0, 0),
+                    textcoords="offset points",
+                    color="black",
+                    weight="bold",
+                    fontsize=legend_text_size,
+                    ha="center",
+                    va="center",
+                )
+                ax2.annotate(
+                    "Neuron Number",
+                    xy=(x_center + radius + 0.01, y_center),
+                    xytext=(0, 0),
+                    textcoords="offset points",
+                    color="black",
+                    weight="bold",
+                    fontsize=legend_text_size,
+                    ha="left",
+                    va="center",
+                )
 
-                    hex_points = RegularPolygon((x_center, y_center), 
-                                            numVertices=6, 
-                                            radius=radius-radius*0.05,
-                                            facecolor="White",
-                                            fill = True, 
-                                            edgecolor="Black",
-                                            linewidth=2)
-                    
-                    ax2.add_patch(hex_points)
-
-                    ax2.annotate(f"#",
-                            xy=(x_center, y_center),
-                            xytext=(0, 0),
-                            textcoords="offset points",
-                            color='black',
-                            weight='bold',
-                            fontsize=legend_text_size,
-                            ha='center',
-                            va='center')
-
-                    ax2.annotate(f"Neuron Number",
-                            xy=(x_center+radius+0.01, y_center),
-                            xytext=(0, 0),
-                            textcoords="offset points",
-                            color='black',
-                            weight='bold',
-                            fontsize=legend_text_size,
-                            ha='left',
-                            va='center')
-                    break
-
-        
-        ax2.set_title(legend_title if legend_title!=False else "Legend", 
-                      fontdict={"fontsize": legend_title_size},
-                      loc="center", 
-                      pad=5,
-                      fontweight='bold',
-                      y=1-y_start+0.03)
-        
-        ax2.set_xlim(0, n_cols*hex_height+n_cols*pad+n_cols*text_pad)
+        ax2.set_title(
+            legend_title if legend_title is not False else "Legend",
+            fontdict={"fontsize": legend_title_size},
+            loc="center",
+            pad=5,
+            fontweight="bold",
+            y=1 - y_start + 0.03,
+        )
+        ax2.set_xlim(
+            0,
+            n_cols * cell_height + n_cols * pad + n_cols * text_pad,
+        )
         ax2.set_ylim(1, -0.01)
-        
         ax2.set_axis_off()
 
-        #ADD WATERMARK
-        # Add white space subplot below the plot
-        ax3 = f.add_subplot(gs[95:100, 0:20], zorder=-1)
-
-        # Add the watermark image to the white space subplot
-        ax3.imshow(self.foot, aspect='equal', alpha=1)
-        ax3.axis('off')
-
-        f.subplots_adjust(wspace=0.1)
+        self._add_watermark_subplot(fig, gs)
+        fig.subplots_adjust(wspace=0.1)
 
         if save:
-            if file_path:
-                f.savefig(f"{file_path}/{file_name}.jpg",dpi=300, bbox_inches = "tight")
-            else:
-                path = 'Plots/Clusters'
-                os.makedirs(path, exist_ok=True)
+            path = (
+                str(file_path)
+                if file_path
+                else "Plots/Clusters"
+            )
+            os.makedirs(path, exist_ok=True)
+            fig.savefig(
+                os.path.join(path, f"{file_name}.jpg"),
+                dpi=300,
+                bbox_inches="tight",
+            )
 
-                f.savefig(f"Plots/Clusters/{file_name}.jpg",dpi=300, bbox_inches = "tight")
-        
         if return_geodataframe:
+            if not cluster_outline:
+                raise ValueError(
+                    "return_geodataframe=True requires "
+                    "cluster_outline=True."
+                )
             return gdf
-                
 
-    def generate_hex_lattice(self, n_columns, n_rows):
-        """
-        Generates the xy coordinates of the BMUs for an odd-r hexagonal grid.
-        Args:
-            n_rows: Number of lines in the Kohonen map.
-            n_columns: Number of columns in the Kohonen map.
+        return fig
 
-        Returns:
-            Coordinates of the [x,y] format for the BMUs in a hexagonal grid.
 
-        """
-        ratio = np.sqrt(3) / 2
+    @staticmethod
+    def generate_rec_lattice(n_columns, n_rows):
+        """Generate rectangular coordinates in row-major order."""
+        n_columns = int(n_columns)
+        n_rows = int(n_rows)
 
-        coord_x, coord_y = np.meshgrid(np.arange(n_columns),
-                                       np.arange(n_rows), 
-                                       sparse=False, 
-                                       indexing='xy')
-        coord_y = coord_y * ratio
-        coord_x = coord_x.astype(float)
+        coord_x, coord_y = np.meshgrid(
+            np.arange(n_columns, dtype=float),
+            np.arange(n_rows, dtype=float),
+            indexing="xy",
+        )
+        return np.column_stack(
+            [coord_x.ravel(), coord_y.ravel()]
+        )
+
+    @staticmethod
+    def generate_hex_lattice(n_columns, n_rows):
+        """Generate odd-r hexagonal coordinates in row-major order."""
+        n_columns = int(n_columns)
+        n_rows = int(n_rows)
+        ratio = np.sqrt(3.0) / 2.0
+
+        coord_x, coord_y = np.meshgrid(
+            np.arange(n_columns, dtype=float),
+            np.arange(n_rows, dtype=float),
+            indexing="xy",
+        )
+        coord_y *= ratio
         coord_x[1::2, :] += 0.5
-        coord_x = coord_x.ravel()
-        coord_y = coord_y.ravel()
 
-        coordinates = np.column_stack([coord_x, coord_y])
+        return np.column_stack(
+            [coord_x.ravel(), coord_y.ravel()]
+        )
 
-        return coordinates
-    
 
     # def build_umatrix(self, expanded=False, log=False):
     #     """

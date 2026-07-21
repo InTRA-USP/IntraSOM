@@ -1371,7 +1371,6 @@ class PlotFactory:
                 bbox_inches="tight",
             )
 
-        plt.show()
         return fig
 
     # ------------------------------------------------------------------

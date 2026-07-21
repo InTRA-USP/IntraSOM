@@ -3081,43 +3081,129 @@ RUNNER.run("SOMFactory.load_som round-trip", test_load_som_roundtrip)
 
 
 # =============================================================================
-# CLUSTERING
+# CLUSTERING — NUMERICAL, GEOMETRY, FUSED REGIONS, AND PLOTS
 # =============================================================================
 
-RUNNER.section("9. CLUSTERING")
+RUNNER.section("9. CLUSTERING — HEXAGONAL AND RECTANGULAR")
 
 
-def test_kmeans_and_dbi():
-    clm = module("clustering")
-    som = primary_model("hexa", "toroid")
-    factory = clm.ClusterFactory(som)
+def cluster_case(lattice, mapshape="toroid", k=4):
+    """Return a cached ClusterFactory and K-means matrix for one lattice."""
+    key = ("cluster_case", lattice, mapshape, int(k))
+
+    if key in CACHE:
+        return CACHE[key]
+
+    som = primary_model(lattice, mapshape)
+    factory = module("clustering").ClusterFactory(som)
 
     clusters = factory.kmeans(
-        k=3,
+        k=k,
         init="k-means++",
         n_init=5,
         max_iter=150,
     )
 
-    rows, cols = som.mapsize[1], som.mapsize[0]
-    require_shape(clusters, (rows, cols), "cluster map")
-    labels = np.unique(clusters)
-    require(len(labels) == 3, f"Expected 3 clusters, got {labels}")
+    CACHE[key] = (som, factory, clusters)
+    return CACHE[key]
 
-    print("Cluster matrix:\n", clusters)
 
-    coords = factory.generate_hex_lattice(cols, rows)
-    require_shape(coords, (rows * cols, 2), "ClusterFactory hex coordinates")
-    require(isinstance(factory.hits_dictionary, dict), "hits_dictionary must be dict")
+def synthetic_cluster_map(som):
+    """
+    Build deterministic regions containing:
+      - two broad connected regions;
+      - one central region;
+      - one disconnected island sharing label 1.
+
+    The disconnected island is important because cluster_outline=True must
+    preserve every dissolved component after GeoDataFrame.explode().
+    """
+    cols, rows = map(int, som.mapsize)
+
+    clusters = np.ones((rows, cols), dtype=int)
+    clusters[:, cols // 2:] = 2
+
+    r0 = max(1, rows // 3)
+    r1 = min(rows - 1, max(r0 + 2, 2 * rows // 3))
+    c0 = max(1, cols // 3)
+    c1 = min(cols - 1, max(c0 + 2, 2 * cols // 3))
+    clusters[r0:r1, c0:c1] = 3
+
+    # Disconnected label-1 island embedded in the right-side label-2 region.
+    island_rows = slice(1, min(4, rows - 1))
+    island_cols = slice(max(cols - 4, cols // 2 + 1), cols - 1)
+    clusters[island_rows, island_cols] = 1
+
+    return clusters
+
+
+def test_kmeans_both_lattices_and_dbi():
+    for lattice in ("hexa", "rect"):
+        som, factory, clusters = cluster_case(lattice, "toroid", k=4)
+        cols, rows = map(int, som.mapsize)
+
+        require_shape(
+            clusters,
+            (rows, cols),
+            f"{lattice} cluster map",
+        )
+
+        labels = np.sort(np.unique(clusters))
+        require(
+            np.array_equal(labels, np.arange(1, 5)),
+            f"{lattice}: expected labels [1, 2, 3, 4], got {labels}",
+        )
+        require(
+            np.issubdtype(clusters.dtype, np.integer),
+            f"{lattice}: K-means labels should be integers",
+        )
+
+        if lattice == "hexa":
+            coords = factory.generate_hex_lattice(cols, rows)
+        else:
+            coords = factory.generate_rec_lattice(cols, rows)
+
+        require_shape(
+            coords,
+            (rows * cols, 2),
+            f"ClusterFactory {lattice} coordinates",
+        )
+        require(
+            isinstance(factory.hits_dictionary, dict),
+            f"{lattice}: hits_dictionary must be dict",
+        )
+
+        hit_nodes = np.asarray(
+            sorted(factory.hits_dictionary),
+            dtype=int,
+        )
+        require(
+            np.all((hit_nodes >= 0) & (hit_nodes < rows * cols)),
+            f"{lattice}: hits_dictionary contains invalid neuron indices",
+        )
+
+        print(
+            f"{lattice}: clusters={labels.tolist()}, "
+            f"shape={clusters.shape}, hits={len(hit_nodes)}"
+        )
 
     if RUN_CLUSTER_DBI:
+        _, factory, _ = cluster_case("hexa", "toroid", k=4)
         result = factory.Davies_Bouldin_analysis(
-            max_clust=min(6, rows * cols - 1),
+            max_clust=6,
             n_iter=2,
             min_type="ensemble",
-            plot=True if RUN_PLOTS else False,
+            plot=bool(RUN_PLOTS),
             save=False,
             verbose=False,
+        )
+        require(
+            isinstance(result, (int, np.integer)),
+            "Davies-Bouldin selection must be an integer",
+        )
+        require(
+            2 <= int(result) <= 6,
+            f"Unexpected Davies-Bouldin result: {result}",
         )
         print("Davies-Bouldin selected result:", result)
 
@@ -3125,127 +3211,304 @@ def test_kmeans_and_dbi():
         "ClusterFactory.kmeans",
         "ClusterFactory.Davies_Bouldin_analysis",
         "ClusterFactory.generate_hex_lattice",
+        "ClusterFactory.generate_rec_lattice",
         "ClusterFactory.hits_dictionary",
     )
 
-    CACHE["clusters"] = clusters
-    CACHE["cluster_factory"] = factory
+
+RUNNER.run(
+    "K-means and cluster geometry for hexa + rect",
+    test_kmeans_both_lattices_and_dbi,
+)
 
 
-RUNNER.run("K-means + Davies-Bouldin analysis", test_kmeans_and_dbi)
+def validate_cluster_geodataframe(gdf, expected_labels, lattice):
+    require(gdf is not None, f"{lattice}: GeoDataFrame return is None")
+    require(len(gdf) > 0, f"{lattice}: dissolved GeoDataFrame is empty")
 
-
-def test_cluster_plot():
-    if not RUN_PLOTS:
-        RUNNER.warn("Cluster plots disabled.")
-        return
-
-    factory = CACHE.get("cluster_factory")
-    clusters = CACHE.get("clusters")
-    if factory is None:
-        som = primary_model("hexa", "toroid")
-        factory = module("clustering").ClusterFactory(som)
-        clusters = factory.kmeans(k=3, n_init=3, max_iter=100)
-
-    factory.plot_kmeans(
-        clusters=clusters,
-        figsize=(8, 6),
-        save=False,
-        hits=True,
-        umatrix=True,
-        watermark_neurons=True,
-        cluster_outline=False,
-        colormap="jet",
-    )
-    plt.show()
-
-    mark("ClusterFactory.plot_kmeans")
-
-
-RUNNER.run("Cluster map plot smoke test", test_cluster_plot, critical=False)
-
-
-def test_cluster_plot_variations():
-    if not RUN_PLOTS:
-        RUNNER.warn("Cluster plot variations disabled.")
-        return
-
-    som = primary_model("hexa", "toroid")
-    factory = CACHE.get("cluster_factory")
-    clusters = CACHE.get("clusters")
-
-    if factory is None or clusters is None:
-        factory = module("clustering").ClusterFactory(som)
-        clusters = factory.kmeans(k=3, n_init=5, max_iter=150)
-
-    # Variation 1: highlighted clusters + transparent fill + outline +
-    # labels and GeoDataFrame return.
-    gdf = factory.plot_kmeans(
-        clusters=clusters,
-        figsize=(9, 7),
-        save=False,
-        hits=True,
-        umatrix=True,
-        watermark_neurons=True,
-        neurons_fontsize=6,
-        alfa_clust=0.30,
-        colormap="jet",
-        cluster_outline=True,
-        clusters_highlight=[1, 3],
-        plot_labels=True,
-        custom_labels=["Cluster A", "Cluster B", "Cluster C"],
-        legend_title="Highlighted clusters",
-        legend_title_size=10,
-        legend_text_size=8,
-        clusterout_maxtext_size=8,
-        return_geodataframe=True,
-        auto_adjust_text=False,
-    )
-    require(gdf is not None, "plot_kmeans(return_geodataframe=True) returned None")
     for required_col in ("geometry", "color", "label", "cluster"):
-        require(required_col in gdf.columns, f"GeoDataFrame missing column {required_col!r}")
-    require(len(gdf) > 0, "GeoDataFrame returned by plot_kmeans is empty")
-    plt.show()
+        require(
+            required_col in gdf.columns,
+            f"{lattice}: GeoDataFrame missing column {required_col!r}",
+        )
 
-    # Variation 2: no U-Matrix background, no hits, stronger opacity,
-    # different colormap and no outlines.
-    factory.plot_kmeans(
-        clusters=clusters,
-        figsize=(8, 6),
-        save=False,
-        hits=False,
-        umatrix=False,
-        watermark_neurons=False,
-        alfa_clust=0.75,
-        cluster_outline=False,
-        colormap="jet",
-        legend_title="Clusters",
-        legend_text_size=8,
+    actual_labels = set(
+        np.asarray(gdf["cluster"], dtype=int).tolist()
     )
-    plt.show()
+    require(
+        actual_labels == set(expected_labels),
+        (
+            f"{lattice}: dissolved cluster labels differ. "
+            f"Expected {set(expected_labels)}, got {actual_labels}"
+        ),
+    )
 
-    # Variation 3: outline-only style with all clusters active.
-    factory.plot_kmeans(
-        clusters=clusters,
-        figsize=(8, 6),
-        save=False,
-        hits=True,
-        umatrix=False,
-        watermark_neurons=True,
-        neurons_fontsize=5,
-        alfa_clust=0.20,
-        colormap="jet",
-        cluster_outline=True,
-        clusters_highlight=[],
-        legend_title="Outline mode",
-        legend_text_size=8,
+    require(
+        bool(gdf.geometry.notna().all()),
+        f"{lattice}: null dissolved geometries found",
     )
-    plt.show()
+    require(
+        bool((~gdf.geometry.is_empty).all()),
+        f"{lattice}: empty dissolved geometries found",
+    )
+    require(
+        bool(gdf.geometry.is_valid.all()),
+        f"{lattice}: invalid dissolved geometries found",
+    )
+    require(
+        bool((gdf.geometry.area > 0).all()),
+        f"{lattice}: dissolved geometry with non-positive area",
+    )
+
+    geometry_types = set(gdf.geometry.geom_type)
+    require(
+        geometry_types.issubset({"Polygon", "MultiPolygon"}),
+        f"{lattice}: unexpected geometry types: {geometry_types}",
+    )
+
+    # Label 1 intentionally contains a broad region and a disconnected island.
+    # After explode(), it must therefore occupy at least two GeoDataFrame rows.
+    label1_parts = int(
+        np.count_nonzero(
+            np.asarray(gdf["cluster"], dtype=int) == 1
+        )
+    )
+    require(
+        label1_parts >= 2,
+        (
+            f"{lattice}: disconnected parts of cluster 1 were not preserved "
+            f"after dissolve/explode; found {label1_parts} part(s)."
+        ),
+    )
+
+    print(
+        f"{lattice}: dissolved rows={len(gdf)}, "
+        f"cluster-1 parts={label1_parts}, "
+        f"geometry types={sorted(geometry_types)}"
+    )
+
+
+def test_cluster_fused_geometries_both_lattices():
+    for lattice in ("hexa", "rect"):
+        som, factory, _ = cluster_case(lattice, "toroid", k=4)
+        clusters = synthetic_cluster_map(som)
+
+        gdf = factory.plot_kmeans(
+            clusters=clusters,
+            figsize=(8, 6),
+            save=False,
+            hits=False,
+            umatrix=False,
+            watermark_neurons=False,
+            alfa_clust=0.45,
+            colormap="jet",
+            cluster_outline=True,
+            plot_labels=False,
+            custom_labels=[
+                "Connected + island",
+                "Right region",
+                "Central region",
+            ],
+            return_geodataframe=True,
+        )
+
+        validate_cluster_geodataframe(
+            gdf,
+            expected_labels=(1, 2, 3),
+            lattice=lattice,
+        )
 
     mark("ClusterFactory.plot_kmeans")
 
 
-RUNNER.run("Cluster map plot variations", test_cluster_plot_variations, critical=False)
+RUNNER.run(
+    "Fused cluster polygons preserve disconnected regions for hexa + rect",
+    test_cluster_fused_geometries_both_lattices,
+)
+
+
+def test_cluster_plot_matrix_both_lattices():
+    if not RUN_PLOTS:
+        RUNNER.warn("Cluster plot matrix disabled.")
+        return
+
+    for lattice in ("hexa", "rect"):
+        som, factory, trained_clusters = cluster_case(
+            lattice,
+            "toroid",
+            k=4,
+        )
+        custom = [
+            "Cluster A",
+            "Cluster B",
+            "Cluster C",
+            "Cluster D",
+        ]
+
+        # 1) Ordinary cell-by-cell rendering.
+        fig_cells = factory.plot_kmeans(
+            clusters=trained_clusters,
+            figsize=(8, 6),
+            save=False,
+            hits=False,
+            umatrix=False,
+            watermark_neurons=False,
+            alfa_clust=0.80,
+            colormap="jet",
+            cluster_outline=False,
+            clusters_highlight=[],
+            legend_title=f"{lattice} individual cells",
+            legend_text_size=7,
+            custom_labels=custom,
+        )
+        require(
+            fig_cells is not None,
+            f"{lattice}: ordinary cluster plot must return Figure",
+        )
+        require(
+            len(fig_cells.axes) >= 2,
+            f"{lattice}: cluster plot should contain map and legend axes",
+        )
+        plt.show()
+        plt.close(fig_cells)
+
+        # 2) Full overlay: U-Matrix + hits + neuron numbers + fused regions +
+        # labels + highlights. This combination protects the most useful and
+        # regression-prone visualization path.
+        fig_fused = factory.plot_kmeans(
+            clusters=trained_clusters,
+            figsize=(9, 7),
+            save=False,
+            hits=True,
+            umatrix=True,
+            watermark_neurons=True,
+            neurons_fontsize=4,
+            alfa_clust=0.32,
+            log=False,
+            colormap="jet",
+            cluster_outline=True,
+            clusters_highlight=[1, 3],
+            plot_labels=True,
+            custom_labels=custom,
+            legend_title=f"{lattice} fused highlighted clusters",
+            legend_title_size=9,
+            legend_text_size=7,
+            clusterout_maxtext_size=7,
+            auto_adjust_text=False,
+        )
+        require(
+            fig_fused is not None,
+            f"{lattice}: fused cluster plot must return Figure",
+        )
+
+        map_ax = fig_fused.axes[0]
+        require(
+            len(map_ax.collections) >= 1,
+            f"{lattice}: fused plot contains no map collections",
+        )
+        require(
+            len(map_ax.texts) >= som.mapsize[0] * som.mapsize[1],
+            (
+                f"{lattice}: watermark_neurons=True should annotate "
+                "every neuron"
+            ),
+        )
+        plt.show()
+        plt.close(fig_fused)
+
+    mark("ClusterFactory.plot_kmeans")
+
+
+RUNNER.run(
+    "Cluster plots: cells and fused U-Matrix overlays for hexa + rect",
+    test_cluster_plot_matrix_both_lattices,
+    critical=False,
+)
+
+
+def test_cluster_plot_validation_and_saving():
+    som, factory, clusters = cluster_case(
+        "rect",
+        "planar",
+        k=3,
+    )
+
+    def expect_error(callable_obj, exc_type, message):
+        try:
+            callable_obj()
+        except exc_type:
+            return
+        except Exception as exc:
+            raise AssertionError(
+                f"{message}: expected {exc_type.__name__}, "
+                f"got {type(exc).__name__}: {exc}"
+            ) from exc
+        raise AssertionError(
+            f"{message}: expected {exc_type.__name__}, no error was raised"
+        )
+
+    expect_error(
+        lambda: factory.plot_kmeans(
+            clusters=np.zeros((2, 2), dtype=int),
+            save=False,
+        ),
+        ValueError,
+        "Invalid cluster shape",
+    )
+
+    bad_nan = clusters.astype(float)
+    bad_nan[0, 0] = np.nan
+    expect_error(
+        lambda: factory.plot_kmeans(
+            clusters=bad_nan,
+            save=False,
+        ),
+        ValueError,
+        "NaN cluster labels",
+    )
+
+    expect_error(
+        lambda: factory.plot_kmeans(
+            clusters=clusters,
+            save=False,
+            cluster_outline=False,
+            return_geodataframe=True,
+        ),
+        ValueError,
+        "GeoDataFrame without dissolved outlines",
+    )
+
+    save_dir = OUTPUT_DIR / "cluster_plot_save_test"
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    fig = factory.plot_kmeans(
+        clusters=clusters,
+        figsize=(6, 5),
+        save=True,
+        file_name="rect_cluster_validation",
+        file_path=save_dir,
+        hits=True,
+        umatrix=True,
+        cluster_outline=True,
+        plot_labels=True,
+        custom_labels=["One", "Two", "Three"],
+    )
+    require(fig is not None, "Saved plot should still return Figure")
+
+    saved = save_dir / "rect_cluster_validation.jpg"
+    require(saved.exists(), f"Cluster plot was not saved: {saved}")
+    require(saved.stat().st_size > 0, "Saved cluster plot is empty")
+    plt.close(fig)
+
+    print("Saved cluster plot:", saved)
+
+    mark("ClusterFactory.plot_kmeans")
+
+
+RUNNER.run(
+    "Cluster plot validation, error handling, and saving",
+    test_cluster_plot_validation_and_saving,
+)
 
 
 # =============================================================================
@@ -3621,14 +3884,6 @@ def test_plotfactory_all_visuals():
         require(fig2 is not None, "component_plot should return Figure")
         plt.show()
 
-        fig3 = plotter.bmu_template(
-            figsize=(9, 8),
-            save=False,
-            fontsize=5,
-        )
-        require(fig3 is not None, "bmu_template should return Figure")
-        plt.show()
-
         plotter.multiple_component_plots(
             wich=list(som.component_names[:min(2, len(som.component_names))]),
             figsize=(7, 6),
@@ -3641,7 +3896,6 @@ def test_plotfactory_all_visuals():
         "PlotFactory.plot_umatrix",
         "PlotFactory.component_plot",
         "PlotFactory.multiple_component_plots",
-        "PlotFactory.bmu_template",
     )
 
 
@@ -3651,16 +3905,21 @@ RUNNER.run(
 )
 
 
-def test_bmu_template_variations_and_transparency():
+def test_bmu_template_compact_hexa_and_rect():
+    """
+    Keep one focused BMU-template test per lattice.
+
+    The template is a utility plot, so the suite checks its essential geometry,
+    labels and alternating transparency without repeatedly rendering many size
+    and topology variations.
+    """
     if not RUN_PLOTS:
-        RUNNER.warn("BMU template variations disabled.")
+        RUNNER.warn("Compact BMU template test disabled.")
         return
 
     cases = [
         (PRIMARY_MAPSIZE, "hexa", "toroid"),
         (PRIMARY_MAPSIZE, "rect", "planar"),
-        (TRANSPOSED_MAPSIZE, "hexa", "planar"),
-        (SQUARE_MAPSIZE, "rect", "planar"),
     ]
 
     for mapsize, lattice, mapshape in cases:
@@ -3670,27 +3929,41 @@ def test_bmu_template_variations_and_transparency():
                 mapsize=mapsize,
                 lattice=lattice,
                 mapshape=mapshape,
-                name=f"template_{mapsize[0]}x{mapsize[1]}_{lattice}_{mapshape}",
+                name=f"template_compact_{lattice}_{mapshape}",
             )
 
         plotter = module("visualization").PlotFactory(som)
 
         fig = plotter.bmu_template(
-            figsize=(9, 7),
+            figsize=(7, 6),
             save=False,
-            fontsize=5,
+            fontsize=4,
             alpha_even_rows=0.25,
             alpha_odd_rows=0.75,
         )
-        require(fig is not None, "bmu_template should return a figure")
+        require(fig is not None, "bmu_template should return a Figure")
+
         ax = fig.axes[0]
-        require(len(ax.texts) == som.mapsize[0] * som.mapsize[1], "bmu_template should annotate every neuron")
-        require(len(ax.collections) >= 1, "bmu_template should draw a patch collection")
+        nnodes = som.mapsize[0] * som.mapsize[1]
+
+        require(
+            len(ax.texts) == nnodes,
+            f"{lattice}: bmu_template should annotate every neuron",
+        )
+        require(
+            len(ax.collections) >= 1,
+            f"{lattice}: bmu_template should draw a cell collection",
+        )
 
         facecolors = ax.collections[0].get_facecolors()
-        require(facecolors.shape[0] == som.mapsize[0] * som.mapsize[1], "Unexpected number of template cells")
-        unique_alpha = np.unique(np.round(facecolors[:, 3], 2))
+        require(
+            facecolors.shape[0] == nnodes,
+            f"{lattice}: unexpected number of template cells",
+        )
 
+        unique_alpha = np.unique(
+            np.round(facecolors[:, 3], 2)
+        )
         require(
             np.allclose(
                 unique_alpha,
@@ -3699,34 +3972,24 @@ def test_bmu_template_variations_and_transparency():
                 atol=0.01,
             ),
             (
-                "BMU template did not preserve the requested row transparency "
-                f"levels. Expected [0.25, 0.75], got {unique_alpha}."
+                f"{lattice}: expected transparency levels [0.25, 0.75], "
+                f"got {unique_alpha}"
             ),
         )
 
         print(
-            f"Template transparency levels for {mapsize} {lattice}: "
-            f"{unique_alpha}"
+            f"{lattice}: BMU template cells={nnodes}, "
+            f"alpha={unique_alpha.tolist()}"
         )
         plt.show()
-
-        # Second variation with different figure/text scale.
-        fig2 = plotter.bmu_template(
-            figsize=(6, 10),
-            save=False,
-            fontsize=3,
-            alpha_even_rows=0.85,
-            alpha_odd_rows=0.40,
-        )
-        require(fig2 is not None, "Second bmu_template variation should return a figure")
-        plt.show()
+        plt.close(fig)
 
     mark("PlotFactory.bmu_template")
 
 
 RUNNER.run(
-    "BMU template variations and transparency checks",
-    test_bmu_template_variations_and_transparency,
+    "Compact BMU template check for hexa + rect",
+    test_bmu_template_compact_hexa_and_rect,
     critical=False,
 )
 
