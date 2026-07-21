@@ -48,7 +48,10 @@ class SOMFactory(object):
               pred_size=0,
               dist_factor = 2, 
               pace_size=500,
-              feature_weights=None):
+              feature_weights=None,
+              bmu_compute_dtype='preserve',
+              bmu_max_memory_mb=256,
+              bmu_config=None):
         """
 
          onstructs an object for SOM training, with the data parameters,
@@ -181,7 +184,10 @@ class SOMFactory(object):
                    pred_size = pred_size,
                    dist_factor = dist_factor,
                    pace_size=pace_size,
-                   feature_weights=feature_weights)
+                   feature_weights=feature_weights,
+                   bmu_compute_dtype=bmu_compute_dtype,
+                   bmu_max_memory_mb=bmu_max_memory_mb,
+                   bmu_config=bmu_config)
 
     @staticmethod
     def load_som(data,
@@ -240,6 +246,9 @@ class SOMFactory(object):
         dist_factor = params["dist_factor"]
         load_param=True
         pace_size = params["pace_size"]
+        bmu_compute_dtype = params.get("bmu_compute_dtype", "preserve")
+        bmu_max_memory_mb = params.get("bmu_max_memory_mb", 256)
+        bmu_config = params.get("bmu_config", None)
 
         return SOM(data = data,
                    neighborhood = neigh_calc,
@@ -263,7 +272,10 @@ class SOMFactory(object):
                    bmus = bmus,
                    dist_factor = dist_factor,
                    pace_size=pace_size,
-                   feature_weights=feature_weights)
+                   feature_weights=feature_weights,
+                   bmu_compute_dtype=bmu_compute_dtype,
+                   bmu_max_memory_mb=bmu_max_memory_mb,
+                   bmu_config=bmu_config)
 
 class SOM(object):
 
@@ -290,11 +302,48 @@ class SOM(object):
                  trained_neurons=None, 
                  bmus = None,
                  dist_factor = 2,
-                 pace_size=100_000):
+                 pace_size=100_000,
+                 bmu_compute_dtype='preserve',
+                 bmu_max_memory_mb=256,
+                 bmu_config=None):
 
         # Mask for missing values
         self.mask = mask
         self.pace_size = pace_size
+
+        # BMU configuration. The public arguments expose the settings that are
+        # most useful in ordinary workflows. Less common tuning options remain
+        # available through bmu_config. Conservative defaults preserve the
+        # input precision and cap the temporary score workspace at 256 MiB.
+        self.bmu_compute_dtype = str(bmu_compute_dtype).lower()
+        if self.bmu_compute_dtype not in {"preserve", "float32", "float64"}:
+            raise ValueError(
+                "bmu_compute_dtype must be 'preserve', 'float32', or 'float64'."
+            )
+        self.bmu_max_memory_mb = float(bmu_max_memory_mb)
+        if self.bmu_max_memory_mb <= 0:
+            raise ValueError("bmu_max_memory_mb must be greater than zero.")
+
+        advanced_defaults = {
+            "neuron_block_size": None,
+            "memory_safety_factor": 2.0,
+            "min_neuron_block_size": 1,
+            "force_two_axis_blocking": False,
+        }
+        if bmu_config is not None:
+            if not isinstance(bmu_config, dict):
+                raise TypeError("bmu_config must be a dictionary or None.")
+            unknown = set(bmu_config) - set(advanced_defaults)
+            if unknown:
+                raise ValueError(
+                    "Unknown bmu_config option(s): " + ", ".join(sorted(unknown))
+                )
+            advanced_defaults.update(bmu_config)
+        if float(advanced_defaults["memory_safety_factor"]) < 1.0:
+            raise ValueError("bmu_config['memory_safety_factor'] must be >= 1.")
+        if int(advanced_defaults["min_neuron_block_size"]) < 1:
+            raise ValueError("bmu_config['min_neuron_block_size'] must be >= 1.")
+        self.bmu_config = advanced_defaults
 
         # Check input type and fill in internal attributes
         print("Loading dataframe...")
@@ -598,6 +647,9 @@ class SOM(object):
         dic["initialization"] = self.initialization
         dic["training"] = self.training
         dic["pace_size"] = self.pace_size
+        dic["bmu_compute_dtype"] = self.bmu_compute_dtype
+        dic["bmu_max_memory_mb"] = self.bmu_max_memory_mb
+        dic["bmu_config"] = dict(self.bmu_config)
         dic["name"] = self.name
         dic["component_names"] = list(self._component_names)
         dic["unit_names"] = list(self._unit_names)
@@ -1790,9 +1842,11 @@ class SOM(object):
                  njb=-1,
                  nth=1,
                  project=False,
-                 pace_size=100_000,
-                 max_distance_memory_mb=256,
-                 nan_distance_strategy="auto"):
+                 pace_size=None,
+                 max_distance_memory_mb=None,
+                 nan_distance_strategy="auto",
+                 compute_dtype=None,
+                 neuron_block_size=None):
         """
         Finds the BMU (Best Matching Unit) for each input vector.
 
@@ -1871,14 +1925,18 @@ class SOM(object):
             pace_size=pace_size,
             max_distance_memory_mb=max_distance_memory_mb,
             nan_distance_strategy=nan_distance_strategy,
+            compute_dtype=compute_dtype,
+            neuron_block_size=neuron_block_size,
         ).T
 
     def _find_bmu_top2(self,
                        input_matrix,
                        project=False,
-                       pace_size=100_000,
-                       max_distance_memory_mb=256,
-                       nan_distance_strategy="auto"):
+                       pace_size=None,
+                       max_distance_memory_mb=None,
+                       nan_distance_strategy="auto",
+                       compute_dtype=None,
+                       neuron_block_size=None):
         """Return the first and second BMUs in a single distance pass."""
         input_matrix = np.asarray(input_matrix)
 
@@ -1918,6 +1976,8 @@ class SOM(object):
             max_distance_memory_mb=max_distance_memory_mb,
             return_top_n=True,
             nan_distance_strategy=nan_distance_strategy,
+            compute_dtype=compute_dtype,
+            neuron_block_size=neuron_block_size,
         )
 
 
@@ -2078,6 +2138,17 @@ class SOM(object):
         np.sqrt(distances_sq, out=distances_sq)
         return distances_sq
 
+    def _resolve_bmu_dtype(self, input_matrix, codebook, compute_dtype=None):
+        """Resolve the numerical dtype used only by the BMU calculation."""
+        value = getattr(self, "bmu_compute_dtype", "preserve") if compute_dtype is None else str(compute_dtype).lower()
+        if value == "preserve":
+            return np.result_type(input_matrix.dtype, codebook.dtype, np.float32)
+        if value == "float32":
+            return np.dtype(np.float32)
+        if value == "float64":
+            return np.dtype(np.float64)
+        raise ValueError("compute_dtype must be 'preserve', 'float32', or 'float64'.")
+
     def _chunk_based_bmu_find(self,
                               input_matrix,
                               codebook,
@@ -2085,190 +2156,172 @@ class SOM(object):
                               nth=1,
                               missing=False,
                               project=False,
-                              pace_size=100_000,
-                              max_distance_memory_mb=256,
+                              pace_size=None,
+                              max_distance_memory_mb=None,
                               return_top_n=False,
-                              nan_distance_strategy="auto"):
-        """
-        Finds matching units for the input matrix in memory-bounded blocks.
+                              nan_distance_strategy="auto",
+                              compute_dtype=None,
+                              neuron_block_size=None):
+        """Find exact BMUs using memory-bounded sample and neuron blocks.
 
-        ``return_top_n=False`` preserves the historical return format with one
-        selected rank per sample: ``(n_samples, 2)``. When ``return_top_n=True``,
-        the first ``nth`` candidates are returned together as two arrays with
-        shape ``(nth, n_samples)``: indices and distances.
+        Complete data use a two-axis exact search. Only a neuron-by-sample score
+        tile is materialized, while the best candidates are merged across neuron
+        tiles. Missing-aware searches retain the validated nan-Euclidean path.
         """
         input_matrix = np.asarray(input_matrix)
         codebook = np.asarray(codebook)
-
         if input_matrix.ndim != 2 or codebook.ndim != 2:
             raise ValueError("input_matrix and codebook must both be 2-D arrays.")
-
         if input_matrix.shape[1] != codebook.shape[1]:
             raise ValueError(
                 f"Feature mismatch: data has {input_matrix.shape[1]} columns, "
                 f"but the codebook has {codebook.shape[1]}."
             )
 
-        dlen = input_matrix.shape[0]
-        nnodes = codebook.shape[0]
+        dlen, nnodes = input_matrix.shape[0], codebook.shape[0]
         nth = int(nth)
-
         if nth < 1 or nth > nnodes:
-            raise ValueError(
-                f"nth must be between 1 and the number of neurons ({nnodes})."
-            )
-
+            raise ValueError(f"nth must be between 1 and the number of neurons ({nnodes}).")
         if dlen == 0:
             if return_top_n:
-                return (
-                    np.empty((nth, 0), dtype=np.intp),
-                    np.empty((nth, 0), dtype=float),
-                )
+                return (np.empty((nth, 0), dtype=np.intp),
+                        np.empty((nth, 0), dtype=float))
             return np.empty((0, 2), dtype=float)
 
-        # Contiguous arrays improve matrix-multiplication throughput.
-        input_matrix = np.ascontiguousarray(input_matrix)
-        codebook = np.ascontiguousarray(codebook)
+        dtype = self._resolve_bmu_dtype(input_matrix, codebook, compute_dtype)
+        X = np.ascontiguousarray(input_matrix, dtype=dtype)
+        W = np.ascontiguousarray(codebook, dtype=dtype)
 
-        # Recompute the codebook norm for the actual feature subset. This is
-        # important for projection with fewer variables than the trained map.
-        if y2 is None or np.asarray(y2).shape[0] != nnodes:
-            y2 = np.einsum(
-                'ij,ij->i',
-                codebook,
-                codebook,
-                optimize=True,
-            )
-        else:
-            # A supplied norm is accepted only when it corresponds to the same
-            # feature space. Recomputing is inexpensive compared with the BMU
-            # matrix product and avoids stale/full-codebook projection norms.
-            y2 = np.einsum(
-                'ij,ij->i',
-                codebook,
-                codebook,
-                optimize=True,
-            )
+        max_mb = getattr(self, "bmu_max_memory_mb", 256.0) if max_distance_memory_mb is None else float(max_distance_memory_mb)
+        if max_mb <= 0:
+            raise ValueError("max_distance_memory_mb must be greater than zero.")
+        requested_sample_block = self.pace_size if pace_size is None else pace_size
+        if requested_sample_block is None:
+            requested_sample_block = dlen
+        requested_sample_block = min(dlen, max(1, int(requested_sample_block)))
 
-        # Determine whether missing-aware Euclidean distance is actually needed.
+        cfg = getattr(self, "bmu_config", {
+            "neuron_block_size": None,
+            "memory_safety_factor": 2.0,
+            "min_neuron_block_size": 1,
+            "force_two_axis_blocking": False,
+        })
+        safety = float(cfg["memory_safety_factor"])
+        usable_bytes = max(1, int(max_mb * 1024**2 / safety))
+        itemsize = np.dtype(dtype).itemsize
+        max_tile_elements = max(1, usable_bytes // itemsize)
+
         if missing:
             try:
                 rough_training = self.actual_train == "Rough"
             except AttributeError:
                 rough_training = False
-
-            use_nan_euclidean = (
-                project
-                or rough_training
-                or not self.previous_epoch
-            )
+            use_nan_euclidean = project or rough_training or not self.previous_epoch
         else:
             use_nan_euclidean = False
 
-        # Limit the temporary distance matrix by both the requested pace and a
-        # predictable memory ceiling.
-        result_dtype = np.result_type(
-            input_matrix.dtype,
-            codebook.dtype,
-            np.float32,
-        )
-        bytes_per_value = np.dtype(result_dtype).itemsize
-        max_bytes = max(1, int(float(max_distance_memory_mb) * 1024 ** 2))
-        memory_factor = 3 if use_nan_euclidean else 1
-        memory_limited_pace = max(
-            1,
-            max_bytes // max(nnodes * bytes_per_value * memory_factor, 1),
-        )
+        # Missing data currently require all neurons in each validated kernel call.
+        if use_nan_euclidean:
+            memory_factor = 3
+            sample_block = max(1, min(
+                requested_sample_block,
+                max_tile_elements // max(nnodes * memory_factor, 1),
+            ))
+            if return_top_n:
+                all_indices = np.empty((nth, dlen), dtype=np.intp)
+                all_distances = np.empty((nth, dlen), dtype=float)
+            else:
+                bmu = np.empty((dlen, 2), dtype=float)
+            for low in range(0, dlen, sample_block):
+                high = min(low + sample_block, dlen)
+                distances = self._nan_euclidean_distances_fast(
+                    W, X[low:high], strategy=nan_distance_strategy
+                )
+                columns = np.arange(high - low)
+                if nth == 1:
+                    idx = np.argmin(distances, axis=0)[None, :]
+                    val = distances[idx[0], columns][None, :]
+                else:
+                    idx = np.argpartition(distances, kth=nth - 1, axis=0)[:nth]
+                    val = np.take_along_axis(distances, idx, axis=0)
+                    order = np.argsort(val, axis=0)
+                    idx = np.take_along_axis(idx, order, axis=0)
+                    val = np.take_along_axis(val, order, axis=0)
+                if return_top_n:
+                    all_indices[:, low:high] = idx
+                    all_distances[:, low:high] = val
+                else:
+                    bmu[low:high, 0] = idx[nth - 1]
+                    bmu[low:high, 1] = val[nth - 1]
+            return (all_indices, all_distances) if return_top_n else bmu
 
-        if pace_size is None:
-            block_size = memory_limited_pace
+        # Complete-data exact two-axis blocking.
+        sample_block = requested_sample_block
+        configured_neuron_block = (
+            cfg["neuron_block_size"]
+            if neuron_block_size is None else neuron_block_size
+        )
+        if configured_neuron_block is None:
+            neuron_block = max(1, max_tile_elements // sample_block)
         else:
-            block_size = min(max(1, int(pace_size)), memory_limited_pace)
+            neuron_block = max(1, int(configured_neuron_block))
+        neuron_block = min(nnodes, neuron_block)
 
-        block_size = min(block_size, dlen)
+        # If the requested sample block is too large even for one neuron row,
+        # shrink it. Otherwise preserve it and derive the neuron tile from memory.
+        sample_block = min(sample_block, max_tile_elements)
+        min_neuron_block = int(cfg["min_neuron_block_size"])
+        if neuron_block < min_neuron_block and nnodes >= min_neuron_block:
+            neuron_block = min_neuron_block
+            sample_block = max(1, min(sample_block, max_tile_elements // neuron_block))
+        if not cfg["force_two_axis_blocking"] and nnodes * sample_block <= max_tile_elements:
+            neuron_block = nnodes
 
+        W2 = np.einsum("ij,ij->i", W, W, optimize=True)
         if return_top_n:
             all_indices = np.empty((nth, dlen), dtype=np.intp)
             all_distances = np.empty((nth, dlen), dtype=float)
         else:
             bmu = np.empty((dlen, 2), dtype=float)
 
-        for low in range(0, dlen, block_size):
-            high = min(low + block_size, dlen)
-            ddata = input_matrix[low:high]
-
-            if use_nan_euclidean:
-                # Preserve the historical sklearn distance semantics
-                # (ordinary Euclidean distance, not squared distance).
-                distances = self._nan_euclidean_distances_fast(
-                    codebook,
-                    ddata,
-                    strategy=nan_distance_strategy,
-                )
-            else:
-                # Partial squared Euclidean distance:
-                # ||x-w||² = ||x||² + ||w||² - 2 w·x.
-                # ||x||² is constant across neurons and can be omitted for
-                # matching-unit selection, preserving historical behavior.
-                distances = codebook @ ddata.T
-                distances *= -2
-                distances += y2[:, None]
-
+        for low in range(0, dlen, sample_block):
+            high = min(low + sample_block, dlen)
+            Xb = X[low:high]
             n_block = high - low
-            columns = np.arange(n_block)
+            best_scores = np.full((nth, n_block), np.inf, dtype=dtype)
+            best_indices = np.full((nth, n_block), -1, dtype=np.intp)
 
-            if return_top_n:
-                if nth == 1:
-                    indices = np.argmin(distances, axis=0)[None, :]
-                    selected = distances[indices[0], columns][None, :]
+            for nlow in range(0, nnodes, neuron_block):
+                nhigh = min(nlow + neuron_block, nnodes)
+                scores = W[nlow:nhigh] @ Xb.T
+                scores *= -2
+                scores += W2[nlow:nhigh, None]
+                local_n = min(nth, nhigh - nlow)
+                if local_n == 1:
+                    local_idx = np.argmin(scores, axis=0)[None, :]
                 else:
-                    # One partition call obtains all requested candidates.
-                    indices = np.argpartition(
-                        distances,
-                        kth=nth - 1,
-                        axis=0,
-                    )[:nth]
-                    candidate_distances = np.take_along_axis(
-                        distances,
-                        indices,
-                        axis=0,
-                    )
-                    order = np.argsort(candidate_distances, axis=0)
-                    indices = np.take_along_axis(indices, order, axis=0)
-                    selected = np.take_along_axis(
-                        candidate_distances,
-                        order,
-                        axis=0,
-                    )
+                    local_idx = np.argpartition(scores, kth=local_n - 1, axis=0)[:local_n]
+                local_scores = np.take_along_axis(scores, local_idx, axis=0)
+                local_idx = local_idx + nlow
 
-                all_indices[:, low:high] = indices
-                all_distances[:, low:high] = selected
+                candidate_scores = np.concatenate((best_scores, local_scores), axis=0)
+                candidate_indices = np.concatenate((best_indices, local_idx), axis=0)
+                keep = np.argpartition(candidate_scores, kth=nth - 1, axis=0)[:nth]
+                best_scores = np.take_along_axis(candidate_scores, keep, axis=0)
+                best_indices = np.take_along_axis(candidate_indices, keep, axis=0)
 
-            elif nth == 1:
-                # argmin is faster and allocates less than partition for BMU1.
-                indices = np.argmin(distances, axis=0)
-                selected = distances[indices, columns]
-                bmu[low:high, 0] = indices
-                bmu[low:high, 1] = selected
-
+            order = np.argsort(best_scores, axis=0)
+            best_scores = np.take_along_axis(best_scores, order, axis=0)
+            best_indices = np.take_along_axis(best_indices, order, axis=0)
+            if return_top_n:
+                all_indices[:, low:high] = best_indices
+                all_distances[:, low:high] = best_scores
             else:
-                # A single argpartition provides both the index and its value;
-                # the previous implementation partitioned the matrix twice.
-                partition = np.argpartition(
-                    distances,
-                    kth=nth - 1,
-                    axis=0,
-                )
-                indices = partition[nth - 1]
-                selected = distances[indices, columns]
-                bmu[low:high, 0] = indices
-                bmu[low:high, 1] = selected
+                bmu[low:high, 0] = best_indices[nth - 1]
+                bmu[low:high, 1] = best_scores[nth - 1]
 
-        if return_top_n:
-            return all_indices, all_distances
+        return (all_indices, all_distances) if return_top_n else bmu
 
-        return bmu
-    
     @property
     def calculate_quantization_error(self):
         return self.QE
