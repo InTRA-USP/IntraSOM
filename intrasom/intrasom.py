@@ -1789,99 +1789,136 @@ class SOM(object):
                  input_matrix,
                  njb=-1,
                  nth=1,
-                 project=False, 
-                 pace_size=100_000):
+                 project=False,
+                 pace_size=100_000,
+                 max_distance_memory_mb=256,
+                 nan_distance_strategy="auto"):
         """
-        Finds the BMU (Best Matching Units) for each input data through
-        of the input data matrix. In a unified way parallelizing the
-        calculation instead of going data by data and comparing with the codebook.
+        Finds the BMU (Best Matching Unit) for each input vector.
 
-        Args:
-            input_matrix: numpy ndarray matrix representing the samples of the
-                input as rows and variables as columns.
+        The calculation is performed in memory-bounded blocks. NumPy/BLAS is
+        allowed to parallelize the matrix multiplication internally, avoiding
+        nested parallelism between a Python thread pool and BLAS threads.
 
-            njb: number of jobs for the parallel search. Default: -1 (automatic
-                search by the number of processing colors)
+        Parameters
+        ----------
+        input_matrix : numpy.ndarray
+            Input samples as rows and variables as columns.
+        njb : int, default=-1
+            Kept for backward compatibility. BMU search no longer creates a
+            Python thread pool because the matrix multiplication is already
+            parallelized by the numerical backend when available.
+        nth : int, default=1
+            Rank of the requested matching unit. ``1`` returns the BMU and
+            ``2`` returns the second-best matching unit.
+        project : bool, default=False
+            Match projected data against the corresponding leading codebook
+            variables.
+        pace_size : int or None, default=100_000
+            Maximum number of samples per block. The effective block size is
+            also limited by ``max_distance_memory_mb``.
+        max_distance_memory_mb : float, default=256
+            Approximate upper memory limit for the temporary neuron-by-sample
+            distance matrix.
 
-            nth:
-
-            project: boolean value for matching BMU related to a
-                projection base on an already trained map.
-
-        Returns:
-            The BMU for each input data in the format [[bmus],[distances]].
+        Returns
+        -------
+        numpy.ndarray
+            Array with shape ``(2, n_samples)``. Row 0 contains neuron indices
+            and row 1 contains the corresponding distance values.
         """
+        del njb  # Backward-compatible argument; BLAS handles parallelism.
 
-        dlen = input_matrix.shape[0]
-        if njb == -1:
-            njb = cpu_count()
-        y2 = np.einsum('ij,ij->i', self.codebook.matrix, self.codebook.matrix)
-        
-        
-        pool = Pool(njb)
+        input_matrix = np.asarray(input_matrix)
 
-        # Create object to find BMU in pieces of data
-        chunk_bmu_finder = self._chunk_based_bmu_find
+        if input_matrix.ndim != 2:
+            raise ValueError(
+                "input_matrix must be a 2-D array with shape "
+                "(n_samples, n_features)."
+            )
 
-        def row_chunk(part):
-            return part * dlen // njb
-
-        def col_chunk(part):
-            return min((part + 1) * dlen // njb, dlen)
-        
-        # Separate chunks of the input input_matrix data to be parsed
-        # by chunk_bmu_finder
-        chunks = [input_matrix[row_chunk(i):col_chunk(i)] for i in range(njb)]
-
+        nth = int(nth)
+        if nth < 1:
+            raise ValueError("nth must be greater than or equal to 1.")
 
         if project:
-            missing_proj = np.isnan(input_matrix).any()
-            if missing_proj:
-                # Map the data chunks and apply the chunk_bmu_finder method on each chunk, finding the BMU for each chunk
-                b = pool.map(lambda chk: chunk_bmu_finder(chk,
-                                                          self.codebook.matrix[:, :input_matrix.shape[1]],
-                                                          y2,
-                                                          nth=nth, 
-                                                          project=project,
-                                                          missing=missing_proj, 
-                                                          pace_size=pace_size),
-                                                          chunks)
-            else:
-                # Map the data chunks and apply the chunk_bmu_finder method on each chunk, finding the BMU for each chunk
-                b = pool.map(lambda chk: chunk_bmu_finder(chk,
-                                    self.codebook.matrix[:, :input_matrix.shape[1]], 
-                                    y2=y2,
-                                    project=project,
-                                    nth=nth,
-                                    pace_size=pace_size),
-                             chunks)
-                
+            codebook = self.codebook.matrix[:, :input_matrix.shape[1]]
         else:
-            if self.missing:
-                # Map the data chunks and apply the chunk_bmu_finder method on each chunk, finding the BMU for each chunk
-                b = pool.map(lambda chk: chunk_bmu_finder(chk,
-                                                          self.codebook.matrix,
-                                                          y2=y2,
-                                                          nth=nth, 
-                                                          missing=True,
-                                                          pace_size=pace_size),
-                                                          chunks)
-            else:
-                # Map the data chunks and apply the chunk_bmu_finder method on each chunk, finding the BMU for each chunk
-                b = pool.map(lambda chk: chunk_bmu_finder(chk,
-                                                          self.codebook.matrix, 
-                                                          y2,
-                                                          nth=nth,
-                                                          pace_size=pace_size),
-                                                          chunks)
-        pool.close()
-        pool.join()
+            codebook = self.codebook.matrix
 
-        # Arrange the BMU data chunks into an array [2,dlen] where the
-        # first line has the BMU and the second the distances
-        bmu = np.asarray(list(itertools.chain(*b))).T
-        del b
-        return bmu
+        codebook = np.asarray(codebook)
+
+        if input_matrix.shape[1] != codebook.shape[1]:
+            raise ValueError(
+                f"Feature mismatch: data has {input_matrix.shape[1]} columns, "
+                f"but the codebook has {codebook.shape[1]}."
+            )
+
+        if nth > codebook.shape[0]:
+            raise ValueError(
+                f"nth={nth} exceeds the number of neurons "
+                f"({codebook.shape[0]})."
+            )
+
+        missing = bool(np.isnan(input_matrix).any()) if project else self.missing
+
+        return self._chunk_based_bmu_find(
+            input_matrix=input_matrix,
+            codebook=codebook,
+            nth=nth,
+            missing=missing,
+            project=project,
+            pace_size=pace_size,
+            max_distance_memory_mb=max_distance_memory_mb,
+            nan_distance_strategy=nan_distance_strategy,
+        ).T
+
+    def _find_bmu_top2(self,
+                       input_matrix,
+                       project=False,
+                       pace_size=100_000,
+                       max_distance_memory_mb=256,
+                       nan_distance_strategy="auto"):
+        """Return the first and second BMUs in a single distance pass."""
+        input_matrix = np.asarray(input_matrix)
+
+        if input_matrix.ndim != 2:
+            raise ValueError(
+                "input_matrix must be a 2-D array with shape "
+                "(n_samples, n_features)."
+            )
+
+        if project:
+            codebook = self.codebook.matrix[:, :input_matrix.shape[1]]
+        else:
+            codebook = self.codebook.matrix
+
+        codebook = np.asarray(codebook)
+
+        if input_matrix.shape[1] != codebook.shape[1]:
+            raise ValueError(
+                f"Feature mismatch: data has {input_matrix.shape[1]} columns, "
+                f"but the codebook has {codebook.shape[1]}."
+            )
+
+        if codebook.shape[0] < 2:
+            raise ValueError(
+                "At least two neurons are required to calculate BMU1 and BMU2."
+            )
+
+        missing = bool(np.isnan(input_matrix).any()) if project else self.missing
+
+        return self._chunk_based_bmu_find(
+            input_matrix=input_matrix,
+            codebook=codebook,
+            nth=2,
+            missing=missing,
+            project=project,
+            pace_size=pace_size,
+            max_distance_memory_mb=max_distance_memory_mb,
+            return_top_n=True,
+            nan_distance_strategy=nan_distance_strategy,
+        )
 
 
     def _update_codebook_voronoi(self, training_data, bmu, neighborhood, missing=False):
@@ -1944,131 +1981,291 @@ class SOM(object):
 
         return np.around(new_codebook, decimals=6)
     
-    def _chunk_based_bmu_find(self,
-                            input_matrix, 
-                            codebook, 
-                            y2=None, 
-                            nth=1, 
-                            missing=False,
-                            project=False, 
-                            pace_size = 100_000):
+
+    def _nan_euclidean_distances_fast(self, codebook, data, strategy="auto"):
+        """Compute sklearn-compatible nan-Euclidean distances efficiently.
+
+        Parameters
+        ----------
+        codebook : ndarray, shape (n_nodes, n_features)
+            Codebook vectors. This optimized implementation requires finite
+            codebook values.
+        data : ndarray, shape (n_samples, n_features)
+            Input samples, possibly containing NaN values.
+        strategy : {"auto", "vectorized", "grouped", "sklearn"}
+            ``vectorized`` uses two BLAS products, ``grouped`` processes equal
+            missing-value masks together, ``auto`` conservatively selects the
+            vectorized implementation, and ``sklearn`` keeps the reference
+            implementation. ``grouped`` is retained as an explicit experimental
+            option rather than part of the default path.
+
+        Returns
+        -------
+        ndarray, shape (n_nodes, n_samples)
+            Euclidean distances with the same p/k regularization used by
+            sklearn.metrics.pairwise.nan_euclidean_distances.
         """
-        Finds the BMU corresponding to the input data matrix.
+        codebook = np.asarray(codebook)
+        data = np.asarray(data)
+        strategy = str(strategy).lower()
 
-        Args:
-            input_matrix: a matrix of the input data, representing the input
-                vectors in the rows and the vector variables in the columns. When the
-                search is parallelized, the input matrix can be a sub-matrix of
-                a larger array.
+        if strategy not in {"auto", "vectorized", "grouped", "sklearn"}:
+            raise ValueError(
+                "nan distance strategy must be one of: auto, vectorized, "
+                "grouped, sklearn."
+            )
+        if codebook.ndim != 2 or data.ndim != 2:
+            raise ValueError("codebook and data must both be 2-D arrays.")
+        if codebook.shape[1] != data.shape[1]:
+            raise ValueError("codebook and data must have the same features.")
+        if not np.isfinite(codebook).all():
+            return nan_euclidean_distances(codebook, data)
+        if strategy == "sklearn":
+            return nan_euclidean_distances(codebook, data)
 
-            codebook: matrix of weights to be used in the search for BMU.
+        observed = ~np.isnan(data)
+        n_samples, n_features = data.shape
+        n_observed = observed.sum(axis=1)
 
-            nth:
+        if strategy == "auto":
+            # Conservative default: the vectorized formulation was the most
+            # consistently fast across repeated, random, and high-missingness
+            # masks in the benchmark suite. The grouped implementation remains
+            # available explicitly for experimentation, but is not selected
+            # automatically because its Python-level grouping overhead can be
+            # larger than the savings from reducing the matrix products.
+            strategy = "vectorized"
 
-        Returns:
-            Returns the BMU and distances for the matrix or sub-matrix of vectors
-            input. In the format [[bmu],[distance]].
-        """
-        def dist_by_type(codebook, ddata, missing, train_type=None):
-            """
-            Function to choose the type of distance to be calculated depending on the presence of data
-            absences and/or the training stage.
-            """
-            if missing:
-                if train_type == "nan_euclid" or train_type == "Projected":
-                    d = nan_euclidean_distances(codebook, ddata)
-                else:
-                    d = np.dot(codebook, ddata.T)
-                    d *= -2
-                    d += y2.reshape(nnodes, 1)
-            else:
-                d = np.dot(codebook, ddata.T)
-                d *= -2
-                d += y2.reshape(nnodes, 1)
-            
-            return d
+        result_dtype = np.result_type(codebook.dtype, data.dtype, np.float32)
+        W = np.ascontiguousarray(codebook, dtype=result_dtype)
+        X = np.ascontiguousarray(np.nan_to_num(data, nan=0.0), dtype=result_dtype)
+        distances_sq = np.empty((W.shape[0], n_samples), dtype=result_dtype)
 
-        # Number of entries (rows) of the input data
-        dlen = input_matrix.shape[0]
-
-        # Initialize an array of dlen rows and two columns
-        bmu = np.empty((dlen, 2))
-        
-        # Number of training nodes in the codebook
-        nnodes = codebook.shape[0]
-
-        # Batch size
-        blen = min(pace_size, dlen)
-
-        # While loop initializer
-        i0 = 0
-
-        if missing:
-            while i0 + 1 <= dlen:
-                # Start searching the data (rows of the input matrix)
-                low = i0  
-
-                # End of data search (rows of the input matrix) for this batch
-                high = min(dlen, i0 + blen)
-                i0 = i0 + blen  # Update loop initializer
-
-                # Clipping on the input matrix in these batch samples
-                ddata = input_matrix[low:high + 1]
-                try:
-                    boolean = self.actual_train == "Rough"
-                except:
-                    boolean = False
-
-                if project == True:
-                    type_search = "nan_euclid"
-                elif boolean == True:
-                    type_search = "nan_euclid"
-                elif self.previous_epoch==False:
-                    type_search = "nan_euclid"
-                else:
-                    type_search = "Fine"
-
-                d = dist_by_type(codebook=codebook, 
-                                 ddata=ddata, 
-                                 missing=missing, 
-                                 train_type = "Projected" if project else type_search)
-
-                # Find the BMU
-                # Function to find the position within the distances array in which is
-                # the smallest value (the BMU), and designate it as the first attribute of the variable
-                # BMU
-                bmu[low:high + 1, 0] = np.argpartition(d, nth, axis=0)[nth - 1]
-
-                # Function to get the smallest distance and designate as second attribute of
-                # BMU variable
-                bmu[low:high + 1, 1] = np.partition(d, nth, axis=0)[nth - 1]
-                del ddata
+        if strategy == "vectorized":
+            mask_float = np.ascontiguousarray(observed, dtype=result_dtype)
+            cross = W @ X.T
+            distances_sq[:] = (W * W) @ mask_float.T
+            distances_sq -= 2.0 * cross
+            distances_sq += np.einsum("ij,ij->i", X, X, optimize=True)[None, :]
         else:
-            while i0 + 1 <= dlen:
-                # Start searching the data (rows of the input matrix)
-                low = i0  
+            unique_masks, inverse = np.unique(
+                observed, axis=0, return_inverse=True
+            )
+            for mask_id, mask in enumerate(unique_masks):
+                sample_idx = np.flatnonzero(inverse == mask_id)
+                if not np.any(mask):
+                    distances_sq[:, sample_idx] = np.nan
+                    continue
+                Wm = W[:, mask]
+                Xm = X[sample_idx][:, mask]
+                block = Wm @ Xm.T
+                block *= -2.0
+                block += np.einsum(
+                    "ij,ij->i", Wm, Wm, optimize=True
+                )[:, None]
+                block += np.einsum(
+                    "ij,ij->i", Xm, Xm, optimize=True
+                )[None, :]
+                distances_sq[:, sample_idx] = block
 
-                # End of data search (rows of the input matrix) for this batch
-                high = min(dlen, i0 + blen)
-                i0 = i0 + blen  # Update loop initializer
+        np.maximum(distances_sq, 0.0, out=distances_sq)
+        valid = n_observed > 0
+        if np.any(valid):
+            distances_sq[:, valid] *= (
+                float(n_features) / n_observed[valid]
+            )[None, :]
+        distances_sq[:, ~valid] = np.nan
+        np.sqrt(distances_sq, out=distances_sq)
+        return distances_sq
 
-                # Clipping on the input matrix in these batch samples
-                ddata = input_matrix[low:high + 1]
+    def _chunk_based_bmu_find(self,
+                              input_matrix,
+                              codebook,
+                              y2=None,
+                              nth=1,
+                              missing=False,
+                              project=False,
+                              pace_size=100_000,
+                              max_distance_memory_mb=256,
+                              return_top_n=False,
+                              nan_distance_strategy="auto"):
+        """
+        Finds matching units for the input matrix in memory-bounded blocks.
 
-                d = dist_by_type(codebook=codebook, 
-                                 ddata=ddata, 
-                                 missing=missing)
+        ``return_top_n=False`` preserves the historical return format with one
+        selected rank per sample: ``(n_samples, 2)``. When ``return_top_n=True``,
+        the first ``nth`` candidates are returned together as two arrays with
+        shape ``(nth, n_samples)``: indices and distances.
+        """
+        input_matrix = np.asarray(input_matrix)
+        codebook = np.asarray(codebook)
 
-                # Find the BMU
-                # Function to find the position within the distances array in which is
-                # the smallest value (the BMU), and designate it as the first attribute of the variable
-                # BMU
-                bmu[low:high + 1, 0] = np.argpartition(d, nth, axis=0)[nth - 1]
+        if input_matrix.ndim != 2 or codebook.ndim != 2:
+            raise ValueError("input_matrix and codebook must both be 2-D arrays.")
 
-                # Function to get the smallest distance and designate as second attribute of
-                # BMU variable
-                bmu[low:high + 1, 1] = np.partition(d, nth, axis=0)[nth - 1]
-                del ddata
+        if input_matrix.shape[1] != codebook.shape[1]:
+            raise ValueError(
+                f"Feature mismatch: data has {input_matrix.shape[1]} columns, "
+                f"but the codebook has {codebook.shape[1]}."
+            )
+
+        dlen = input_matrix.shape[0]
+        nnodes = codebook.shape[0]
+        nth = int(nth)
+
+        if nth < 1 or nth > nnodes:
+            raise ValueError(
+                f"nth must be between 1 and the number of neurons ({nnodes})."
+            )
+
+        if dlen == 0:
+            if return_top_n:
+                return (
+                    np.empty((nth, 0), dtype=np.intp),
+                    np.empty((nth, 0), dtype=float),
+                )
+            return np.empty((0, 2), dtype=float)
+
+        # Contiguous arrays improve matrix-multiplication throughput.
+        input_matrix = np.ascontiguousarray(input_matrix)
+        codebook = np.ascontiguousarray(codebook)
+
+        # Recompute the codebook norm for the actual feature subset. This is
+        # important for projection with fewer variables than the trained map.
+        if y2 is None or np.asarray(y2).shape[0] != nnodes:
+            y2 = np.einsum(
+                'ij,ij->i',
+                codebook,
+                codebook,
+                optimize=True,
+            )
+        else:
+            # A supplied norm is accepted only when it corresponds to the same
+            # feature space. Recomputing is inexpensive compared with the BMU
+            # matrix product and avoids stale/full-codebook projection norms.
+            y2 = np.einsum(
+                'ij,ij->i',
+                codebook,
+                codebook,
+                optimize=True,
+            )
+
+        # Determine whether missing-aware Euclidean distance is actually needed.
+        if missing:
+            try:
+                rough_training = self.actual_train == "Rough"
+            except AttributeError:
+                rough_training = False
+
+            use_nan_euclidean = (
+                project
+                or rough_training
+                or not self.previous_epoch
+            )
+        else:
+            use_nan_euclidean = False
+
+        # Limit the temporary distance matrix by both the requested pace and a
+        # predictable memory ceiling.
+        result_dtype = np.result_type(
+            input_matrix.dtype,
+            codebook.dtype,
+            np.float32,
+        )
+        bytes_per_value = np.dtype(result_dtype).itemsize
+        max_bytes = max(1, int(float(max_distance_memory_mb) * 1024 ** 2))
+        memory_factor = 3 if use_nan_euclidean else 1
+        memory_limited_pace = max(
+            1,
+            max_bytes // max(nnodes * bytes_per_value * memory_factor, 1),
+        )
+
+        if pace_size is None:
+            block_size = memory_limited_pace
+        else:
+            block_size = min(max(1, int(pace_size)), memory_limited_pace)
+
+        block_size = min(block_size, dlen)
+
+        if return_top_n:
+            all_indices = np.empty((nth, dlen), dtype=np.intp)
+            all_distances = np.empty((nth, dlen), dtype=float)
+        else:
+            bmu = np.empty((dlen, 2), dtype=float)
+
+        for low in range(0, dlen, block_size):
+            high = min(low + block_size, dlen)
+            ddata = input_matrix[low:high]
+
+            if use_nan_euclidean:
+                # Preserve the historical sklearn distance semantics
+                # (ordinary Euclidean distance, not squared distance).
+                distances = self._nan_euclidean_distances_fast(
+                    codebook,
+                    ddata,
+                    strategy=nan_distance_strategy,
+                )
+            else:
+                # Partial squared Euclidean distance:
+                # ||x-w||² = ||x||² + ||w||² - 2 w·x.
+                # ||x||² is constant across neurons and can be omitted for
+                # matching-unit selection, preserving historical behavior.
+                distances = codebook @ ddata.T
+                distances *= -2
+                distances += y2[:, None]
+
+            n_block = high - low
+            columns = np.arange(n_block)
+
+            if return_top_n:
+                if nth == 1:
+                    indices = np.argmin(distances, axis=0)[None, :]
+                    selected = distances[indices[0], columns][None, :]
+                else:
+                    # One partition call obtains all requested candidates.
+                    indices = np.argpartition(
+                        distances,
+                        kth=nth - 1,
+                        axis=0,
+                    )[:nth]
+                    candidate_distances = np.take_along_axis(
+                        distances,
+                        indices,
+                        axis=0,
+                    )
+                    order = np.argsort(candidate_distances, axis=0)
+                    indices = np.take_along_axis(indices, order, axis=0)
+                    selected = np.take_along_axis(
+                        candidate_distances,
+                        order,
+                        axis=0,
+                    )
+
+                all_indices[:, low:high] = indices
+                all_distances[:, low:high] = selected
+
+            elif nth == 1:
+                # argmin is faster and allocates less than partition for BMU1.
+                indices = np.argmin(distances, axis=0)
+                selected = distances[indices, columns]
+                bmu[low:high, 0] = indices
+                bmu[low:high, 1] = selected
+
+            else:
+                # A single argpartition provides both the index and its value;
+                # the previous implementation partitioned the matrix twice.
+                partition = np.argpartition(
+                    distances,
+                    kth=nth - 1,
+                    axis=0,
+                )
+                indices = partition[nth - 1]
+                selected = distances[indices, columns]
+                bmu[low:high, 0] = indices
+                bmu[low:high, 1] = selected
+
+        if return_top_n:
+            return all_indices, all_distances
 
         return bmu
     
@@ -2125,37 +2322,40 @@ class SOM(object):
             topological neighbors. The result ranges from 0 to 1.
         """
 
-        bmus1 = self._find_bmu(
+        top2_indices, _ = self._find_bmu_top2(
             self.get_data,
-            nth=1,
             pace_size=self.pace_size,
-        )[0].astype(int)
+        )
 
-        bmus2 = self._find_bmu(
-            self.get_data,
-            nth=2,
-            pace_size=self.pace_size,
-        )[0].astype(int)
-
-        distances = self._distance_matrix[
-            bmus1,
-            bmus2,
-        ]
+        bmus1 = top2_indices[0].astype(int)
+        bmus2 = top2_indices[1].astype(int)
 
         if self.lattice == "rect":
 
-            # Squared Euclidean grid distances:
-            #
-            # orthogonal = 1
-            # diagonal   = 2
-            #
-            # Both belong to the 8-connected neighborhood.
+            cols, rows = self.mapsize
+
+            row1, col1 = np.divmod(bmus1, cols)
+            row2, col2 = np.divmod(bmus2, cols)
+
+            row_delta = np.abs(row1 - row2)
+            col_delta = np.abs(col1 - col2)
+
+            if self.mapshape == "toroid":
+                row_delta = np.minimum(row_delta, rows - row_delta)
+                col_delta = np.minimum(col_delta, cols - col_delta)
+
             adjacent = (
-                distances
-                <= 2.0 + 1e-12
+                (row_delta <= 1)
+                & (col_delta <= 1)
+                & ((row_delta + col_delta) > 0)
             )
 
         elif self.lattice == "hexa":
+
+            distances = self._distance_matrix[
+                bmus1,
+                bmus2,
+            ]
 
             adjacent = np.isclose(
                 distances,

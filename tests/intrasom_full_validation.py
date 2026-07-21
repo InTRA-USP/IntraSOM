@@ -2194,70 +2194,24 @@ def _forced_topographic_error(
     bmu1_index,
     bmu2_index,
 ):
-    """
-    Evaluate SOM.topographic_error using deterministic synthetic BMU pairs.
+    """Evaluate topographic_error using deterministic synthetic BMU pairs."""
+    n_samples = len(som.get_data)
 
-    The original _find_bmu method is restored before returning.
-    """
-    n_samples = len(
-        som.get_data
-    )
+    top2_indices = np.vstack([
+        np.full(n_samples, bmu1_index, dtype=int),
+        np.full(n_samples, bmu2_index, dtype=int),
+    ])
+    top2_distances = np.zeros((2, n_samples), dtype=float)
 
-    first = np.vstack(
-        [
-            np.full(
-                n_samples,
-                bmu1_index,
-                dtype=float,
-            ),
-            np.zeros(
-                n_samples,
-                dtype=float,
-            ),
-        ]
-    )
-
-    second = np.vstack(
-        [
-            np.full(
-                n_samples,
-                bmu2_index,
-                dtype=float,
-            ),
-            np.zeros(
-                n_samples,
-                dtype=float,
-            ),
-        ]
-    )
-
-    responses = iter(
-        [
-            first,
-            second,
-        ]
-    )
-
-    original_find_bmu = (
-        som._find_bmu
-    )
+    original_find_bmu_top2 = som._find_bmu_top2
 
     try:
-
-        som._find_bmu = (
-            lambda *args, **kwargs:
-            next(responses)
+        som._find_bmu_top2 = (
+            lambda *args, **kwargs: (top2_indices, top2_distances)
         )
-
-        return float(
-            som.topographic_error
-        )
-
+        return float(som.topographic_error)
     finally:
-
-        som._find_bmu = (
-            original_find_bmu
-        )
+        som._find_bmu_top2 = original_find_bmu_top2
 
 
 def test_topographic_error_respects_lattice_adjacency():
