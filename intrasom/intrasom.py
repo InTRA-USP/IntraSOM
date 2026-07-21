@@ -20,7 +20,6 @@ from scipy.ndimage import shift
 # Plots
 import matplotlib.pyplot as plt
 from matplotlib.patches import RegularPolygon, Rectangle
-from matplotlib import cm
 import matplotlib.gridspec as gridspec
 import matplotlib as mpl
 
@@ -48,7 +47,8 @@ class SOMFactory(object):
               missing=False,
               pred_size=0,
               dist_factor = 2, 
-              pace_size=500):
+              pace_size=500,
+              feature_weights=None):
         """
 
          onstructs an object for SOM training, with the data parameters,
@@ -134,8 +134,31 @@ class SOMFactory(object):
         """
         # Apply normalization if it is defined
         normalization = "None" if normalization is None else normalization
-        normalizer = NormalizerFactory.build(normalization)
 
+        if normalization == "var_weighted":
+
+            if feature_weights is None:
+                raise ValueError(
+                    "feature_weights must be provided when "
+                    "normalization='var_weighted'."
+                )
+
+            if len(feature_weights) != data.shape[1]:
+                raise ValueError(
+                    f"Expected {data.shape[1]} feature weights, "
+                    f"but received {len(feature_weights)}."
+                )
+
+            normalizer = NormalizerFactory.build(
+                normalization,
+                weights=feature_weights
+            )
+
+        else:
+
+            normalizer = NormalizerFactory.build(
+                normalization
+            )
         # Build the neighborhood calculation object according to the function of
         # specified neighborhood
         neigh_calc = NeighborhoodFactory.build(neighborhood)
@@ -157,7 +180,8 @@ class SOMFactory(object):
                    missing = missing,
                    pred_size = pred_size,
                    dist_factor = dist_factor,
-                   pace_size=pace_size)
+                   pace_size=pace_size,
+                   feature_weights=feature_weights)
 
     @staticmethod
     def load_som(data,
@@ -183,7 +207,19 @@ class SOMFactory(object):
         """
         print("Loading data...")
         normalization = params["normalization"]
-        normalizer = NormalizerFactory.build(normalization)
+
+        feature_weights = params.get(
+            "feature_weights",
+            None
+        )
+
+        if normalization == "var_weighted":
+            normalizer = NormalizerFactory.build(
+                normalization,
+                weights=feature_weights
+            )
+        else:
+            normalizer = NormalizerFactory.build(normalization)
         neigh_calc = NeighborhoodFactory.build(params["neighborhood"])
         mapsize = params["mapsize"]
         mask = params["mask"]
@@ -226,7 +262,8 @@ class SOMFactory(object):
                    trained_neurons = trained_neurons, 
                    bmus = bmus,
                    dist_factor = dist_factor,
-                   pace_size=pace_size)
+                   pace_size=pace_size,
+                   feature_weights=feature_weights)
 
 class SOM(object):
 
@@ -235,6 +272,7 @@ class SOM(object):
                  neighborhood='gaussian',
                  normalizer="var",
                  normalization = "var",
+                 feature_weights=None,
                  mapsize=None,
                  mask=None,
                  mapshape='toroid',
@@ -286,6 +324,7 @@ class SOM(object):
         print("Normalizing data...")
         self._normalizer = normalizer
         self._normalization = "None" if normalization is None else normalization
+        self.feature_weights = feature_weights
         self._dim = data.shape[1]
         self._dlen = data.shape[0]
         self.pred_size = pred_size
@@ -307,15 +346,175 @@ class SOM(object):
         self.mapshape = mapshape
         self.initialization = initialization
         
-        if mapsize:
-            if mapsize[1]%2!=0:
-                self.mapsize = (mapsize[0], mapsize[1]+1)
-                print(f"The number of lines cannot be odd.\
-                The map size has been changed to: {self.mapsize}")
-            else:
-                self.mapsize = mapsize
+        # --------------------------------------------------
+        # MAP SIZE
+        # Public convention:
+        #
+        # mapsize = (columns, rows)
+        # --------------------------------------------------
+
+        if mapsize is None:
+
+            self.mapsize = self._expected_mapsize(
+                self._data
+            )
+
+        elif isinstance(
+            mapsize,
+            (int, np.integer)
+        ):
+
+            # Integer mapsize is interpreted as the total
+            # desired number of neurons.
+            n_nodes = int(mapsize)
+
+            if n_nodes <= 0:
+                raise ValueError(
+                    "mapsize must contain a positive "
+                    "number of neurons."
+                )
+
+            # --------------------------------------------------
+            # Find all exact factor pairs:
+            #
+            # n_nodes = columns * rows
+            #
+            # Preference is given to the most square-like map.
+            # --------------------------------------------------
+
+            candidates = []
+
+            max_factor = int(
+                np.sqrt(n_nodes)
+            )
+
+            for factor in range(
+                1,
+                max_factor + 1
+            ):
+
+                if n_nodes % factor == 0:
+
+                    other = (
+                        n_nodes // factor
+                    )
+
+                    # mapsize convention:
+                    # (columns, rows)
+
+                    candidates.append(
+                        (
+                            other,
+                            factor
+                        )
+                    )
+
+                    if other != factor:
+
+                        candidates.append(
+                            (
+                                factor,
+                                other
+                            )
+                        )
+
+            # --------------------------------------------------
+            # Hexagonal toroidal maps require an even
+            # number of rows.
+            # --------------------------------------------------
+
+            if (
+                lattice == "hexa"
+                and
+                mapshape == "toroid"
+            ):
+
+                candidates = [
+                    candidate
+                    for candidate in candidates
+                    if candidate[1] % 2 == 0
+                ]
+
+                if not candidates:
+
+                    raise ValueError(
+                        f"Cannot create an exact "
+                        f"hexagonal toroidal map with "
+                        f"{n_nodes} neurons and an even "
+                        f"number of rows. "
+                        f"Provide mapsize=(columns, rows) "
+                        f"explicitly."
+                    )
+
+            # Choose the factor pair closest to a square
+            self.mapsize = min(
+                candidates,
+                key=lambda size: abs(
+                    size[0] - size[1]
+                )
+            )
+
+        elif isinstance(
+            mapsize,
+            (tuple, list, np.ndarray)
+        ):
+
+            if len(mapsize) != 2:
+
+                raise ValueError(
+                    "mapsize must contain exactly "
+                    "two values in the format "
+                    "(columns, rows)."
+                )
+
+            cols = int(
+                mapsize[0]
+            )
+
+            rows = int(
+                mapsize[1]
+            )
+
+            if cols <= 0 or rows <= 0:
+
+                raise ValueError(
+                    "The number of columns and rows "
+                    "must be greater than zero."
+                )
+
+            # Only hexagonal toroidal maps require
+            # an even number of rows.
+            if (
+                lattice == "hexa"
+                and
+                mapshape == "toroid"
+                and
+                rows % 2 != 0
+            ):
+
+                rows += 1
+
+                print(
+                    "Hexagonal toroidal maps require "
+                    "an even number of rows. "
+                    f"The map size has been changed to "
+                    f"({cols}, {rows})."
+                )
+
+            self.mapsize = (
+                cols,
+                rows
+            )
+
         else:
-            self.mapsize = self._expected_mapsize(self._data)
+
+            raise TypeError(
+                "mapsize must be None, an integer, "
+                "or a tuple/list in the format "
+                "(columns, rows)."
+            )
+
+
         self.QE = 0
         self.QE_expanded = np.zeros(self._dlen)
 
@@ -337,24 +536,15 @@ class SOM(object):
             self.codebook = Codebook(self.mapsize, self.lattice, self.mapshape, self.dist_factor)
             self.codebook.matrix = self._normalizer.normalize_by(self.data_raw, trained_neurons.iloc[:,7:].values)
             
-            try:
-                print("Loading distances matrix...")
-                self._distance_matrix = np.load("Results/distance_matrix.npy")
-                if self.mapsize[0]*self.mapsize[1] != self._distance_matrix.shape[0]:
-                    self._distance_matrix = self.calculate_map_dist
-            except:
-                self._distance_matrix = self.calculate_map_dist
+            print("Loading distances matrix...")
+            self._distance_matrix = self.calculate_map_dist
         else:
             self.data_missing = {"indices":tuple(zip(*np.argwhere(np.isnan(self.data_raw)))), 
                                  "nan_values":None}
             self._bmu = np.zeros((2,self._dlen))
             self.codebook = Codebook(self.mapsize, self.lattice, self.mapshape, self.dist_factor)
-            try:
-                self._distance_matrix = np.load("Results/distance_matrix.npy")
-                if self.mapsize[0]*self.mapsize[1] != self._distance_matrix.shape[0]:
-                    self._distance_matrix = self.calculate_map_dist
-            except:
-                self._distance_matrix = self.calculate_map_dist
+            print("Loading distances matrix...")
+            self._distance_matrix = self.calculate_map_dist
 
     # CLASS PROPERTIES
     
@@ -400,6 +590,11 @@ class SOM(object):
         dic["lattice"] = self.lattice
         dic["neighborhood"] = self.neighborhood.name
         dic["normalization"] = self._normalization
+        dic["feature_weights"] = (
+                None
+                if self.feature_weights is None
+                else list(self.feature_weights)
+            )
         dic["initialization"] = self.initialization
         dic["training"] = self.training
         dic["pace_size"] = self.pace_size
@@ -440,42 +635,93 @@ class SOM(object):
 
     @property  
     def calculate_map_dist(self):
-        """
-        Calculates the grid distances, which will be used during the training
-        steps and returns them in the form of an array of internal distances
-        from the grid.
-        """
-        # Capture the number of training neurons
+
         nnodes = self.codebook.nnodes
 
-        # Create a matrix of zeros in the format nnodes x nnodes
-        distance_matrix = np.zeros((nnodes, nnodes))
-        
-        # Iterates over the nodes and fills the distance matrix for each node,
-        # through the grid_dist function
+        distance_matrix = np.zeros(
+            (nnodes, nnodes),
+            dtype=float
+        )
+
         print("Initializing map...")
+
+        # --------------------------------------------------
+        # TOROIDAL
+        # --------------------------------------------------
+
         if self.mapshape == "toroid":
-            # Access matrix for the first neuron
-            initial_matrix = self.codebook.grid_dist(0).reshape(self.mapsize[1], self.mapsize[0])
-            
+
+            # Only the distances from neuron 0 are calculated
+            initial_matrix = (
+                self.codebook
+                .grid_dist(0)
+                .reshape(
+                    self.mapsize[1],  # rows
+                    self.mapsize[0]   # columns
+                )
+            )
+
             counter = 0
-            for i in tqdm(range(self.mapsize[1]), position=0, leave=True, desc="Creating Neuron Distance Rows", unit="rows"):
+
+            for i in tqdm(
+                range(self.mapsize[1]),
+                position=0,
+                leave=True,
+                desc="Creating Neuron Distance Rows",
+                unit="rows"
+            ):
+
                 for j in range(self.mapsize[0]):
-                    shifted = shift(initial_matrix, (i,j), mode='grid-wrap')
-                    #account for odd-r shifts - j direction
-                    if i%2!=0:
-                        shifted[0::2] = shift(shifted[0::2], (0,1), mode='grid-wrap')
-                    distance_matrix[counter] = shifted.flatten().astype(int)
-                    counter+=1
+
+                    # Periodic translation
+                    shifted = np.roll(
+                        initial_matrix,
+                        shift=(i, j),
+                        axis=(0, 1)
+                    )
+
+                    # Extra correction only for odd-r
+                    # HEXAGONAL lattices
+                    if (
+                        self.lattice == "hexa"
+                        and i % 2 != 0
+                    ):
+
+                        shifted[0::2] = np.roll(
+                            shifted[0::2],
+                            shift=1,
+                            axis=1
+                        )
+
+                    distance_matrix[counter] = (
+                        shifted.ravel()
+                    )
+
+                    counter += 1
+
+        # --------------------------------------------------
+        # PLANAR
+        # --------------------------------------------------
+
         elif self.mapshape == "planar":
-            for i in tqdm(range(nnodes), desc="Creating Neuron Distance Rows", unit=" Neurons"):
-                dist = self.codebook.grid_dist(i)
-                distance_matrix[i,:] = dist
-                del dist 
+
+            for i in tqdm(
+                range(nnodes),
+                desc="Creating Neuron Distance Rows",
+                unit="Neurons"
+            ):
+
+                distance_matrix[i, :] = (
+                    self.codebook.grid_dist(i)
+                )
+
         else:
-            sys.exit("Mapshape only accepts 'toroid' or 'planar' as parameter")
-            
-        
+
+            raise ValueError(
+                "mapshape only accepts "
+                "'toroid' or 'planar'."
+            )
+
         return distance_matrix
 
     @property
@@ -576,13 +822,15 @@ class SOM(object):
         """
 
         # Dictionary to make the terms more explanatory
-        dic_params={
-            "var":"Variance",
-            "toroid":"Toroid",
-            "hexa":"Hexagonal",
-            "random":"Randomic",
-            "gaussian":"Gaussian",
-            True:"Yes"
+        dic_params = {
+            "var": "Variance",
+            "var_weighted": "Weighted Variance",
+            "None": "None",
+            "toroid": "Toroid",
+            "hexa": "Hexagonal",
+            "random": "Randomic",
+            "gaussian": "Gaussian",
+            True: "Yes"
         }
 
         # Open a text file
@@ -612,6 +860,17 @@ class SOM(object):
         text_file.write(f"Training Polygon: {dic_params.get(self.mapshape)}\n")
         text_file.write(f"Lattice: {dic_params.get(self.lattice)}\n")
         text_file.write(f"Normalization: {dic_params.get(self._normalizer.name)}\n")
+        if self._normalizer.name == "var_weighted":
+
+            text_file.write("Feature Weights:\n")
+
+            for feature, weight in zip(
+                self._component_names,
+                self.feature_weights
+            ):
+                text_file.write(
+                    f"  {feature}: {weight}\n"
+                )
         text_file.write(f"Initialization: {dic_params.get(self.initialization)}\n")
         text_file.write(f"Neighborhood Function: {dic_params.get(self.neighborhood.name)}\n")
         if self.missing:
@@ -1825,113 +2084,287 @@ class SOM(object):
     @property
     def topographic_error(self):
         """
-        Function to calculate the topographic error.
+        Calculate the topographic error of the trained SOM.
+
+        The topographic error measures the proportion of samples whose first
+        and second Best Matching Units (BMU1 and BMU2) are not adjacent on the
+        SOM lattice.
+
+        Adjacency depends on the lattice geometry.
+
+        Hexagonal lattice
+        -----------------
+        A neuron has six immediate neighbors. In the grid-distance matrix,
+        immediate hexagonal neighbors have distance equal to 1.
+
+        Rectangular lattice
+        -------------------
+        The rectangular lattice uses an 8-connected neighborhood:
+
+            NW   N   NE
+            \\ | /
+            W -- X -- E
+            / | \\
+            SW   S   SE
+
+        The rectangular grid stores squared Euclidean distances:
+
+            orthogonal neighbor -> 1
+            diagonal neighbor   -> 2
+
+        Therefore, BMU1 and BMU2 are considered adjacent when their squared
+        grid distance is less than or equal to 2.
+
+        Both planar and toroidal topology are handled automatically through
+        ``self._distance_matrix``.
+
+        Returns
+        -------
+        float
+            Fraction of input samples for which BMU1 and BMU2 are not
+            topological neighbors. The result ranges from 0 to 1.
         """
-        bmus1 = self._find_bmu(self.get_data, nth=1, pace_size=self.pace_size)[0].astype(int)
-        bmus2 = self._find_bmu(self.get_data, nth=2, pace_size=self.pace_size)[0].astype(int)
 
-        rows = self.mapsize[1]
-        cols = self.mapsize[0]
+        bmus1 = self._find_bmu(
+            self.get_data,
+            nth=1,
+            pace_size=self.pace_size,
+        )[0].astype(int)
 
-        #odd-r offset
-        ii = [[1, 0, -1, -1, -1, 0], [1, 1, 0, -1, 0, 1]]
-        jj = [[0, 1, 1, 0, -1, -1], [0, 1, 1, 0, -1, -1]]
+        bmus2 = self._find_bmu(
+            self.get_data,
+            nth=2,
+            pace_size=self.pace_size,
+        )[0].astype(int)
 
-        neigs = np.zeros((cols*rows,6))
-        neuron_grid = np.arange(1, rows * cols + 1).reshape(rows, cols)
+        distances = self._distance_matrix[
+            bmus1,
+            bmus2,
+        ]
 
-        for y in range(rows):
-            for x in range(cols):
-                current_index = neuron_grid[y, x] - 1
-                
-                for k, (i, j) in enumerate(zip(ii[y % 2], jj[y % 2])):
-                    new_y = (y + j) % rows  # Wrap-around in the vertical direction
-                    new_x = (x + i) % cols  # Wrap-around in the horizontal direction
-                    
-                    neigs[current_index, k] = neuron_grid[new_y, new_x]
-        neigs = neigs.astype(int)
+        if self.lattice == "rect":
 
-        bmus1_ind = bmus1-1
+            # Squared Euclidean grid distances:
+            #
+            # orthogonal = 1
+            # diagonal   = 2
+            #
+            # Both belong to the 8-connected neighborhood.
+            adjacent = (
+                distances
+                <= 2.0 + 1e-12
+            )
 
-        bmus1_neig = neigs[bmus1_ind]
-        error_counter = 0
-        for i,bmu2 in enumerate(bmus2):
-            if bmu2 not in bmus1_neig[i]:
-                error_counter +=1
-        topo_error = error_counter/bmus1_ind.shape[0]
+        elif self.lattice == "hexa":
 
-        return topo_error
+            adjacent = np.isclose(
+                distances,
+                1.0,
+            )
+
+        else:
+
+            raise ValueError(
+                "Unsupported lattice. "
+                "Expected 'rect' or 'hexa', "
+                f"received {self.lattice!r}."
+            )
+
+        return float(
+            np.mean(
+                ~adjacent
+            )
+        )
         
 
     def build_umatrix(self, expanded=False, log=False):
         """
-        Function to calculate the U-Matrix of unified distances from the
-        trained weight matrix.
+        Calculate the U-Matrix from trained neuron weights.
 
-        Args:
-            expanded: boolean value to indicate whether the return will be from the
-                summarized unified distances matrix (average of distances from the 6
-                neighborhood BMU) or expanded (all distance values)
-                
-        Returns:
-            Expanded or summarized unified distances matrix.
+        Map convention
+        --------------
+        mapsize = (columns, rows)
+        NumPy shape = (rows, columns)
+
+        Expanded neighbor order
+        -----------------------
+        Hexagonal (6):
+            0 = right
+            1 = down-right
+            2 = down-left
+            3 = left
+            4 = up-left
+            5 = up-right
+
+            The horizontal offset of diagonal neighbors follows the odd-r row
+            parity used by IntraSOM.
+
+        Rectangular (8):
+            0 = right
+            1 = down-right
+            2 = down
+            3 = down-left
+            4 = left
+            5 = up-left
+            6 = up
+            7 = up-right
+
+            Diagonal distances are intentionally included so the rectangular
+            U-Matrix has a complete expanded representation between neurons.
+
+        Parameters
+        ----------
+        expanded : bool, default=False
+            If True, return every neighbor distance with shape
+            (rows, cols, n_neighbors). If False, return the mean neighbor
+            distance for each neuron with shape (rows, cols).
+        log : bool, default=False
+            Apply the natural logarithm, preserving the historical IntraSOM
+            behavior.
         """
-        # Function to find distance quickly
-        def fast_norm(x):
-            """
-            Retorna a norma L2 de um array 1-D.
-            """
-            return np.sqrt(np.dot(x, x.T))
 
-        # Matrix of BMU weights
-        weights = np.reshape(self.codebook.matrix, (self.mapsize[1], self.mapsize[0], self.codebook.matrix.shape[1]))
+        cols, rows = self.mapsize
 
-        # Neighbor hexagonal search
-        if self.lattice == 'hexa':
-            ii = [[1, 1, 0, -1, 0, 1], [1, 0,-1, -1, -1, 0]]
-            jj = [[0, 1, 1, 0, -1, -1], [0, 1, 1, 0, -1, -1]]
-            # Initialize U-Matrix
-            um = np.nan * np.zeros((weights.shape[0], weights.shape[1], 6))
-        # elif self.lattice == 'quad':
-        #    ii = [[1, 0, -1,  0], [1, 0, -1,  0]]
-        #    jj = [[0, 1,  0, -1], [0, 1,  0, -1]]
-        #    # Initialize U-Matrix
-        #    um = np.nan * np.zeros((weights.shape[0], weights.shape[1], 4))
+        weights = np.asarray(
+            self.codebook.matrix,
+            dtype=float,
+        ).reshape(
+            rows,
+            cols,
+            self.codebook.matrix.shape[1],
+        )
+
+        row_grid, col_grid = np.indices(
+            (rows, cols),
+            dtype=int,
+        )
+
+        if self.lattice == "hexa":
+            # Historical odd-r convention used by IntraSOM.
+            # Even rows use ii[1] in the original implementation;
+            # odd rows use ii[0].
+            dx_even = np.array(
+                [1, 0, -1, -1, -1, 0],
+                dtype=int,
+            )
+            dx_odd = np.array(
+                [1, 1, 0, -1, 0, 1],
+                dtype=int,
+            )
+            dy = np.array(
+                [0, 1, 1, 0, -1, -1],
+                dtype=int,
+            )
+
+            n_neighbors = 6
+            even_rows = (row_grid % 2) == 0
+
+        elif self.lattice == "rect":
+            # Clockwise order starting at the right neighbor.
+            offsets = np.array(
+                [
+                    [1, 0],    # right
+                    [1, 1],    # down-right
+                    [0, 1],    # down
+                    [-1, 1],   # down-left
+                    [-1, 0],   # left
+                    [-1, -1],  # up-left
+                    [0, -1],   # up
+                    [1, -1],   # up-right
+                ],
+                dtype=int,
+            )
+
+            n_neighbors = 8
+
         else:
-            raise Exception("build_umatrix error: non hexagonal lattice not implemented!")
+            raise ValueError(
+                "lattice must be 'hexa' or 'rect'. "
+                f"Received: {self.lattice!r}"
+            )
 
-        # Fill U-Matrix
-        if self.mapshape == 'planar':
-            for y in range(weights.shape[0]):
-                for x in range(weights.shape[1]):
-                    w_2 = weights[y, x]
-                    e = y % 2 == 0
-                    for k, (i, j) in enumerate(zip(ii[e], jj[e])):
-                        if (x+i >= 0 and x+i < weights.shape[1] and y+j >= 0 and y+j < weights.shape[0]): ## if not periodic (non toroidal)
-                            w_1 = weights[y+j, x+i]
-                            um[y, x, k] = fast_norm(w_2-w_1)
-                    # this is needed to avoid identation error with the outer elif
-        elif self.mapshape == 'toroid': # trick for periodic
-            for y in range(weights.shape[0]):
-                for x in range(weights.shape[1]):
-                    w_2 = weights[y, x]
-                    e = y % 2 == 0
-                    for k, (i, j) in enumerate(zip(ii[e], jj[e])):
-                        index_y = ( y + j ) % self.mapsize[1] ## neighbors - -1 is handled by numpy, but beyond the mapsize we use % mapsize trick
-                        index_x = ( x + i ) % self.mapsize[0] ## neighbors - -1 is handled by numpy, but beyond the mapsize we use % mapsize trick
-                        w_1 = weights[ index_y, index_x]
-                        um[y, x, k] = fast_norm(w_2-w_1)
-        else:
-            raise Exception("mapshape '%s' not acceptable"%self.mapshape)
-        
+        um = np.full(
+            (rows, cols, n_neighbors),
+            np.nan,
+            dtype=float,
+        )
+
+        for k in range(n_neighbors):
+
+            if self.lattice == "hexa":
+                dx = np.where(
+                    even_rows,
+                    dx_even[k],
+                    dx_odd[k],
+                )
+                step_y = dy[k]
+            else:
+                dx = offsets[k, 0]
+                step_y = offsets[k, 1]
+
+            neighbor_rows = row_grid + step_y
+            neighbor_cols = col_grid + dx
+
+            if self.mapshape == "toroid":
+                neighbor_rows %= rows
+                neighbor_cols %= cols
+
+                neighbor_weights = weights[
+                    neighbor_rows,
+                    neighbor_cols,
+                ]
+
+                um[:, :, k] = np.linalg.norm(
+                    weights - neighbor_weights,
+                    axis=2,
+                )
+
+            elif self.mapshape == "planar":
+                valid = (
+                    (neighbor_rows >= 0)
+                    & (neighbor_rows < rows)
+                    & (neighbor_cols >= 0)
+                    & (neighbor_cols < cols)
+                )
+
+                if np.any(valid):
+                    source_weights = weights[valid]
+                    neighbor_weights = weights[
+                        neighbor_rows[valid],
+                        neighbor_cols[valid],
+                    ]
+
+                    um[:, :, k][valid] = np.linalg.norm(
+                        source_weights - neighbor_weights,
+                        axis=1,
+                    )
+
+            else:
+                raise ValueError(
+                    "mapshape must be 'planar' or 'toroid'. "
+                    f"Received: {self.mapshape!r}"
+                )
+
         if expanded:
-            # Expanded U-Matrix
-            # return um
-            return np.log(um) if log else um
-        else:
-            # Reduced U-Matrix
-            # return np.nanmean(um, axis=2)
-            return np.log(np.nanmean(um, axis=2)) if log else np.nanmean(um, axis=2)
+            return (
+                np.log1p(um)
+                if log
+                else um
+            )
+
+        umat = np.nanmean(
+            um,
+            axis=2,
+        )
+
+        return (
+            np.log1p(umat)
+            if log
+            else umat
+        )
+
+        return np.log(reduced) if log else reduced
+
         
     
     def plot_umatrix(self,
@@ -1984,7 +2417,7 @@ class SOM(object):
                                       yy[(j,i)]*2),
                                      numVertices=6,
                                      radius=1/np.sqrt(3),
-                                     facecolor= cm.jet(norm(umat[j][i])),
+                                     facecolor= mpl.colormaps["jet"](norm(umat[j][i])),
                                      alpha=1)#, edgecolor='black')
 
                 ax.add_patch(hex)
@@ -1995,7 +2428,7 @@ class SOM(object):
                                           yy[(j,i)]*2),
                                          numVertices=6,
                                          radius=1/np.sqrt(3),
-                                         facecolor=cm.jet(norm(um[j,i,0])),
+                                         facecolor=mpl.colormaps["jet"](norm(um[j,i,0])),
                                          alpha=1)
                     ax.add_patch(hex)
 
@@ -2005,7 +2438,7 @@ class SOM(object):
                                           yy[(j,i)]*2+(np.sqrt(3)/2)),
                                          numVertices=6,
                                          radius=1/np.sqrt(3),
-                                         facecolor=cm.jet(norm(um[j,i,1])),
+                                         facecolor=mpl.colormaps["jet"](norm(um[j,i,1])),
                                          alpha=1)
                     ax.add_patch(hex)
 
@@ -2015,7 +2448,7 @@ class SOM(object):
                                           yy[(j,i)]*2+(np.sqrt(3)/2)),
                                          numVertices=6,
                                          radius=1/np.sqrt(3),
-                                         facecolor=cm.jet(norm(um[j,i,2])),
+                                         facecolor=mpl.colormaps["jet"](norm(um[j,i,2])),
                                          alpha=1)
                     ax.add_patch(hex)
                     

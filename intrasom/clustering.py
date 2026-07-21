@@ -9,7 +9,6 @@ from matplotlib import pyplot as plt
 import matplotlib as mpl
 import matplotlib.gridspec as gridspec
 from matplotlib.patches import RegularPolygon
-from matplotlib import cm
 
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import minmax_scale
@@ -80,30 +79,132 @@ class ClusterFactory(object):
 
 
         def clust_counter(clusts):
-            # Remove None/NaN
-            cl = [c for c in clusts if c is not None and not (isinstance(c, float) and np.isnan(c))]
+            """
+            Conta a frequência dos números de clusters encontrados.
+
+            Sempre retorna array de shape (n, 2):
+                coluna 0 = número de clusters
+                coluna 1 = percentual
+
+            Se não houver dados válidos:
+                shape = (0, 2)
+            """
+
+            cl = [
+                int(c)
+                for c in clusts
+                if c is not None
+                and not (
+                    isinstance(c, (float, np.floating))
+                    and np.isnan(c)
+                )
+            ]
+
             if len(cl) == 0:
-                # Retorna array vazio no mesmo formato esperado
-                return np.array([])
-            count = np.array(Counter(cl).most_common(), dtype=object)
+                return np.empty((0, 2), dtype=object)
+
+            count = np.array(
+                Counter(cl).most_common(),
+                dtype=object
+            )
+
             total = count[:, 1].astype(float).sum()
+
             if total == 0:
-                return np.array([])
-            count[:, 1] = count[:, 1].astype(float) / total * 100.0
+                return np.empty((0, 2), dtype=object)
+
+            count[:, 1] = (
+                count[:, 1].astype(float)
+                / total
+                * 100.0
+            )
+
             return count
 
-        # --- Dados
-        X = np.asarray(self.neuron_matrix)
+        # --------------------------------------------------
+        # DATA
+        # --------------------------------------------------
 
-        # Normalização robusta (evita std==0)
-        mean = np.mean(X, axis=0)
-        std = np.std(X, axis=0)
+        X = np.asarray(
+            self.neuron_matrix,
+            dtype=float
+        )
+
+        n_samples = X.shape[0]
+
+        # Davies-Bouldin requires at least:
+        #
+        #   2 clusters
+        #   and
+        #   n_clusters < n_samples
+        #
+        if n_samples < 3:
+
+            raise ValueError(
+                "Davies-Bouldin analysis requires "
+                "at least 3 neurons."
+            )
+
+
+        # --------------------------------------------------
+        # NORMALIZATION
+        # --------------------------------------------------
+
+        mean = np.mean(
+            X,
+            axis=0
+        )
+
+        std = np.std(
+            X,
+            axis=0
+        )
+
         eps = 1e-12
-        std_safe = np.where(std < eps, 1.0, std)
-        X = (X - mean) / std_safe
 
-        # --- Varredura DBI
-        n_clusters = np.arange(2, max_clust + 1, 1)
+        std_safe = np.where(
+            std < eps,
+            1.0,
+            std
+        )
+
+        X = (
+            X - mean
+        ) / std_safe
+
+
+        # --------------------------------------------------
+        # VALID CLUSTER RANGE
+        # --------------------------------------------------
+
+        max_valid_clust = min(
+            int(max_clust),
+            n_samples - 1
+        )
+
+        if max_valid_clust < 2:
+
+            raise ValueError(
+                "The maximum number of clusters "
+                "must be at least 2."
+            )
+
+
+        if max_clust > max_valid_clust:
+
+            print(
+                f"max_clust={max_clust} is larger than "
+                f"the maximum valid value for "
+                f"{n_samples} neurons. "
+                f"Using max_clust={max_valid_clust}."
+            )
+
+
+        n_clusters = np.arange(
+            2,
+            max_valid_clust + 1,
+            dtype=int
+        )
         db_summary = {}
 
         for it in tqdm(range(n_iter)):
@@ -259,33 +360,176 @@ class ClusterFactory(object):
         # --- Contagens
         fcounter = clust_counter(f_clust_min)
         scounter = clust_counter(s_clust_min)
+        tcounter = clust_counter(t_clust_min)
         sumcounter = clust_counter(sum_clust_min)
 
-        # --- Saída
-        def top2_msg(counter_arr, title):
-            if counter_arr.size == 0:
-                return [f"{title}:", "Sem dados suficientes."]
-            lines = [f"{title}:"]
-            # imprime até 2 entradas, se existirem
-            for k in range(min(2, counter_arr.shape[0])):
-                lines.append(f"Cluster Number: {counter_arr[k][0]}. Percentage: {counter_arr[k][1]:.2f}%.")
-            return lines
+
+        # ---------------------------------------------------------
+        # Funções auxiliares seguras
+        # ---------------------------------------------------------
+
+        def counter_value(counter, position=0):
+            """
+            Retorna o número de clusters de uma posição do contador.
+
+            Se essa posição não existir, retorna None.
+            """
+
+            if counter.shape[0] <= position:
+                return None
+
+            return int(counter[position, 0])
+
+
+        def counter_percentage(counter, position=0):
+            """
+            Retorna o percentual de uma posição do contador.
+
+            Se essa posição não existir, retorna None.
+            """
+
+            if counter.shape[0] <= position:
+                return None
+
+            return float(counter[position, 1])
+
+
+        def print_counter(counter, title, max_items=2):
+
+            print(f"{title}:")
+
+            if counter.shape[0] == 0:
+                print("Sem mínimo disponível.")
+                return
+
+            for i in range(min(max_items, counter.shape[0])):
+
+                cluster = int(counter[i, 0])
+                percentage = float(counter[i, 1])
+
+                print(
+                    f"Cluster Number: {cluster}. "
+                    f"Percentage: {percentage:.2f}%."
+                )
+
+
+        # ---------------------------------------------------------
+        # Valores principais
+        # ---------------------------------------------------------
+
+        first_minimum = counter_value(fcounter, 0)
+        second_minimum = counter_value(scounter, 0)
+        third_minimum = counter_value(tcounter, 0)
+        ensemble_minimum = counter_value(sumcounter, 0)
+
+
+        # ---------------------------------------------------------
+        # Saída
+        # ---------------------------------------------------------
 
         if verbose:
+
             print("Davies-Bouldin results:\n")
-            print(*top2_msg(fcounter, "First Minimum"), sep="\n")
-            print("")
-            print(*top2_msg(scounter, "Second Minimum"), sep="\n")
-            print("")
-            print(*top2_msg(sumcounter, "Ensamble Minimum"), sep="\n")
+
+            print_counter(
+                fcounter,
+                "First Minimum"
+            )
+
+            print()
+
+            print_counter(
+                scounter,
+                "Second Minimum"
+            )
+
+            print()
+
+            print_counter(
+                tcounter,
+                "Third Minimum"
+            )
+
+            print()
+
+            print_counter(
+                sumcounter,
+                "Ensemble Minimum"
+            )
+
         else:
-            fm = fcounter[0][0] if fcounter.size else None
-            sm = scounter[0][0] if scounter.size else None
-            em = sumcounter[0][0] if sumcounter.size else None
+
             print("Davies-Bouldin results:")
-            print(f"First Minimum: {fm}")
-            print(f"Second Minimum: {sm}")
-            print(f"Ensamble Minimum: {em}")
+
+            print(
+                f"First Minimum: "
+                f"{first_minimum if first_minimum is not None else 'N/A'}"
+            )
+
+            print(
+                f"Second Minimum: "
+                f"{second_minimum if second_minimum is not None else 'N/A'}"
+            )
+
+            print(
+                f"Third Minimum: "
+                f"{third_minimum if third_minimum is not None else 'N/A'}"
+            )
+
+            print(
+                f"Ensemble Minimum: "
+                f"{ensemble_minimum if ensemble_minimum is not None else 'N/A'}"
+            )
+
+
+        # ---------------------------------------------------------
+        # Escolhe resultado conforme min_type
+        # ---------------------------------------------------------
+
+        min_type_lower = str(min_type).lower()
+
+        if min_type_lower in ("first", "first_minimum"):
+
+            selected = first_minimum
+
+        elif min_type_lower in ("second", "second_minimum"):
+
+            # Se não existe segundo mínimo, usa o primeiro
+            selected = (
+                second_minimum
+                if second_minimum is not None
+                else first_minimum
+            )
+
+        elif min_type_lower in (
+            "ensamble",
+            "ensemble",
+            "ensemble_minimum"
+        ):
+
+            selected = (
+                ensemble_minimum
+                if ensemble_minimum is not None
+                else first_minimum
+            )
+
+        else:
+
+            raise ValueError(
+                "min_type deve ser 'first', 'second' "
+                "ou 'ensamble'."
+            )
+
+
+        # Última proteção
+        if selected is None:
+            raise RuntimeError(
+                "Não foi possível determinar um número "
+                "válido de clusters pelo índice Davies-Bouldin."
+            )
+
+
+        return int(selected)
 
             
     def plot_kmeans(self, 
@@ -411,7 +655,7 @@ class ClusterFactory(object):
                                           yy[(j,i)]*2),
                                          numVertices=6,
                                          radius=1/np.sqrt(3),
-                                         facecolor= cm.jet(norm(umat[j][i])),
+                                         facecolor= mpl.colormaps["jet"](norm(umat[j][i])),
                                          alpha=alfa, 
                                          zorder=0)#, edgecolor='black')
 
@@ -423,7 +667,7 @@ class ClusterFactory(object):
                                               yy[(j,i)]*2),
                                              numVertices=6,
                                              radius=1/np.sqrt(3),
-                                             facecolor=cm.jet(norm(um[j,i,0])),
+                                             facecolor=mpl.colormaps["jet"](norm(um[j,i,0])),
                                              alpha=alfa, 
                                              zorder=0)
                         ax.add_patch(hexagon)
@@ -434,7 +678,7 @@ class ClusterFactory(object):
                                               yy[(j,i)]*2+(np.sqrt(3)/2)),
                                              numVertices=6,
                                              radius=1/np.sqrt(3),
-                                             facecolor=cm.jet(norm(um[j,i,1])),
+                                             facecolor=mpl.colormaps["jet"](norm(um[j,i,1])),
                                              alpha=alfa, 
                                              zorder=0)
                         ax.add_patch(hexagon)
@@ -445,7 +689,7 @@ class ClusterFactory(object):
                                               yy[(j,i)]*2+(np.sqrt(3)/2)),
                                              numVertices=6,
                                              radius=1/np.sqrt(3),
-                                             facecolor=cm.jet(norm(um[j,i,2])),
+                                             facecolor=mpl.colormaps["jet"](norm(um[j,i,2])),
                                              alpha=alfa, 
                                              zorder=0)
                         ax.add_patch(hexagon)
@@ -467,7 +711,7 @@ class ClusterFactory(object):
         
         norm = mpl.colors.Normalize(vmin=np.nanmin(clusters), vmax=np.nanmax(clusters))
 
-        cmap = cm.get_cmap(colormap)
+        cmap = mpl.colormaps.get_cmap(colormap)
         if cluster_outline:
             cluster_vertices_dict = {}
 

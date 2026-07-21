@@ -70,60 +70,265 @@ class Codebook(object):
 
     def pca_linear_initialization(self, data):
         """
-        Initialization of the map by using just the first two eigenvalues and
-        eigenvectors. The initialization is done in the following steps:
-        1. Transformation of input data and creation of a template matrix
-        2. Creation of a matrix with scaling factors for each principal component (PC)
-        3. Obtaining and normalization of the eigenvector(s)
-        4. Linear combination for each node of the template matrix with the PC
+        Initializes the SOM codebook using the first principal components
+        of the input data.
 
-        Args:
-            data: data to use for the initialization
+        The SOM map convention is:
 
-        Returns:
-            Initialized matrix with same dimension as input data.
+            mapsize = (columns, rows)
+
+        For a two-dimensional map, neuron coordinates are generated using
+        row-major indexing:
+
+            row = index // columns
+            col = index % columns
+
+        The first spatial coordinate corresponds to the column (x) and the
+        second to the row (y).
+
+        The initialization is performed in the following steps:
+
+            1. Center the input data around its mean.
+            2. Generate normalized spatial coordinates for each SOM neuron.
+            3. Compute the first principal component(s) of the input data.
+            4. Scale the principal directions by their explained variance.
+            5. Distribute the neuron vectors along those directions.
+
+        Parameters
+        ----------
+        data : numpy.ndarray
+            Input data used to initialize the SOM codebook.
+            Rows represent samples and columns represent variables.
+
+        Returns
+        -------
+        None
+            The initialized codebook is stored in ``self.matrix``.
         """
-        cols = self.mapsize[1]
-        coord = None
-        pca_components = None
 
-        me = np.mean(data, 0)
-        data = (data - me)
-        tmp_matrix = np.tile(me, (self.nnodes, 1))
+        # --------------------------------------------------
+        # INPUT DATA
+        # --------------------------------------------------
 
-        if np.min(self.mapsize) > 1:
-            coord = np.zeros((self.nnodes, 2))
+        data = np.asarray(
+            data,
+            dtype=float
+        )
+
+        # --------------------------------------------------
+        # MAP GEOMETRY
+        #
+        # IntraSOM convention:
+        # mapsize = (columns, rows)
+        # --------------------------------------------------
+
+        cols, rows = self.mapsize
+
+        # --------------------------------------------------
+        # CENTER DATA
+        # --------------------------------------------------
+
+        me = np.mean(
+            data,
+            axis=0
+        )
+
+        centered_data = (
+            data - me
+        )
+
+        # Start every neuron at the mean vector.
+        tmp_matrix = np.tile(
+            me,
+            (
+                self.nnodes,
+                1
+            )
+        )
+
+        # --------------------------------------------------
+        # SOM SPATIAL COORDINATES
+        # --------------------------------------------------
+
+        if cols > 1 and rows > 1:
+
+            # Two-dimensional SOM
             pca_components = 2
 
-            for i in range(0, self.nnodes):
-                coord[i, 0] = int(i / cols)  # x
-                coord[i, 1] = int(i % cols)  # y
+            coord = np.zeros(
+                (
+                    self.nnodes,
+                    2
+                ),
+                dtype=float
+            )
 
-        elif np.min(self.mapsize) == 1:
-            coord = np.zeros((self.nnodes, 1))
+            for node_ind in range(
+                self.nnodes
+            ):
+
+                # Row-major indexing:
+                #
+                # 0  1  2  ... cols-1
+                # cols ...
+                #
+                row = node_ind // cols
+                col = node_ind % cols
+
+                # Spatial coordinates:
+                #
+                # axis 0 -> x -> column
+                # axis 1 -> y -> row
+                coord[
+                    node_ind,
+                    0
+                ] = col
+
+                coord[
+                    node_ind,
+                    1
+                ] = row
+
+        else:
+
+            # One-dimensional SOM:
+            #
+            # mapsize may be:
+            #     (N, 1)
+            # or
+            #     (1, N)
+            #
+            # In both cases there is only one spatial dimension.
+
             pca_components = 1
 
-            for i in range(0, self.nnodes):
-                coord[i, 0] = int(i % cols)  # y
+            coord = np.arange(
+                self.nnodes,
+                dtype=float
+            ).reshape(
+                -1,
+                1
+            )
 
-        mx = np.max(coord, axis=0)
-        mn = np.min(coord, axis=0)
-        coord = (coord - mn)/(mx-mn)
-        coord = (coord - .5)*2
+        # --------------------------------------------------
+        # NORMALIZE SPATIAL COORDINATES TO [-1, 1]
+        # --------------------------------------------------
 
-        pca = PCA(n_components=pca_components, svd_solver='randomized')
+        coord_max = np.max(
+            coord,
+            axis=0
+        )
 
-        pca.fit(data)
+        coord_min = np.min(
+            coord,
+            axis=0
+        )
+
+        coord_range = (
+            coord_max - coord_min
+        )
+
+        # Protection against division by zero.
+        #
+        # Normally this only matters for a map containing
+        # a single neuron.
+        coord_range[
+            coord_range == 0
+        ] = 1.0
+
+        coord = (
+            coord - coord_min
+        ) / coord_range
+
+        coord = (
+            coord - 0.5
+        ) * 2.0
+
+        # --------------------------------------------------
+        # PCA
+        # --------------------------------------------------
+
+        pca = PCA(
+            n_components=pca_components,
+            svd_solver="randomized"
+        )
+
+        pca.fit(
+            centered_data
+        )
+
         eigvec = pca.components_
-        eigval = pca.explained_variance_
-        norms = np.sqrt(np.einsum('ij,ij->i', eigvec, eigvec))
-        eigvec = ((eigvec.T/norms)*eigval).T
 
-        for j in range(self.nnodes):
-            for i in range(eigvec.shape[0]):
-                tmp_matrix[j, :] = tmp_matrix[j, :] + coord[j, i]*eigvec[i, :]
+        eigval = (
+            pca.explained_variance_
+        )
 
-        self.matrix = np.around(tmp_matrix, decimals=6)
+        # --------------------------------------------------
+        # NORMALIZE PCA DIRECTIONS
+        # --------------------------------------------------
+
+        norms = np.sqrt(
+            np.einsum(
+                "ij,ij->i",
+                eigvec,
+                eigvec
+            )
+        )
+
+        # Protection against division by zero.
+        norms[
+            norms == 0
+        ] = 1.0
+
+        eigvec = (
+            (
+                eigvec.T / norms
+            )
+            * eigval
+        ).T
+
+        # --------------------------------------------------
+        # INITIALIZE EACH NEURON
+        #
+        # mean
+        #   +
+        # spatial coordinate along PC1
+        #   +
+        # spatial coordinate along PC2
+        # --------------------------------------------------
+
+        for node_ind in range(
+            self.nnodes
+        ):
+
+            for component_ind in range(
+                eigvec.shape[0]
+            ):
+
+                tmp_matrix[
+                    node_ind,
+                    :
+                ] += (
+                    coord[
+                        node_ind,
+                        component_ind
+                    ]
+                    *
+                    eigvec[
+                        component_ind,
+                        :
+                    ]
+                )
+
+        # --------------------------------------------------
+        # SAVE INITIALIZED CODEBOOK
+        # --------------------------------------------------
+
+        self.matrix = np.around(
+            tmp_matrix,
+            decimals=6
+        )
+
         self.initialized = True
     
     def pretrain(self):
@@ -164,57 +369,381 @@ class Codebook(object):
 
     def _rect_dist_plan(self, node_ind):
         """
-        Finds the Manhattan distance matrix (L1) of a neural network node
-        for all others, for a rectangular lattice in a map with
-        planar topology.
+        Calculate grid distances for a rectangular planar SOM using
+        Euclidean distance between neuron coordinates.
 
-        Args:
-            node_ind: neural network node index, between 0 and nnodes-1.
+        The IntraSOM map convention is:
 
-        Returns:
-            Returns array of distances from this node to all other nodes in the
-            grid, on a planar map.
+            mapsize = (columns, rows)
 
+        Neurons are stored using row-major indexing:
+
+            row = node_index // columns
+            col = node_index % columns
+
+        In a rectangular lattice, the eight surrounding neurons belong to
+        the local 8-connected neighborhood. However, their spatial distances
+        are not forced to be identical.
+
+        Orthogonal neighbors have distance:
+
+            1.0
+
+        Diagonal neighbors have distance:
+
+            sqrt(2)
+
+        For example:
+
+                sqrt(2)    1    sqrt(2)
+
+                    \\    |    /
+
+                1 -------- X -------- 1
+
+                    /    |    \\
+
+                sqrt(2)    1    sqrt(2)
+
+        Using Euclidean grid distance instead of Manhattan or Chebyshev
+        distance produces a more isotropic neighborhood during SOM training.
+
+        This is particularly important when a Gaussian neighborhood function
+        is used, because influence then decreases according to the actual
+        geometric distance from the BMU rather than forming diamond-shaped
+        (Manhattan) or square-shaped (Chebyshev) distance bands.
+
+        Parameters
+        ----------
+        node_ind : int
+            Linear index of the reference neuron.
+
+            Valid values are between:
+
+                0 and self.nnodes - 1
+
+        Returns
+        -------
+        numpy.ndarray
+            One-dimensional float array with shape ``(self.nnodes,)``.
+
+            Each element contains the Euclidean grid distance between
+            ``node_ind`` and the corresponding neuron.
+
+            Examples of returned distances:
+
+                same neuron          -> 0.0
+                horizontal neighbor  -> 1.0
+                vertical neighbor    -> 1.0
+                diagonal neighbor    -> sqrt(2)
+                two horizontal steps -> 2.0
+
+        Notes
+        -----
+        This function returns floating-point distances.
+
+        Do not cast the result to integer, because doing so would collapse
+        diagonal distance ``sqrt(2)`` into ``1`` and destroy the intended
+        Euclidean geometry of the rectangular lattice.
         """
-        # Separate column and row values
-        rows, cols = self.mapsize
 
-        # Generate the xy coordinates of the BMUs for a rectangular grid
-        coordinates = self.generate_rec_lattice(rows, cols)
+        # --------------------------------------------------
+        # MAP GEOMETRY
+        #
+        # IntraSOM convention:
+        #
+        #     mapsize = (columns, rows)
+        # --------------------------------------------------
 
-        # Find the Manhattan distances for a rectangular grid through
-        # its coordinates
-        dist = np.array(abs(coordinates[ind] - coordinates[node_ind]).sum() \
-            for ind in range(len(coordinates)))
+        cols, rows = self.mapsize
+
+        # --------------------------------------------------
+        # VALIDATE NODE INDEX
+        # --------------------------------------------------
+
+        if not 0 <= node_ind < self.nnodes:
+
+            raise IndexError(
+                f"node_ind must be between "
+                f"0 and {self.nnodes - 1}. "
+                f"Received: {node_ind}."
+            )
+
+        # --------------------------------------------------
+        # REFERENCE NEURON COORDINATES
+        #
+        # Row-major indexing:
+        #
+        #     0   1   2   ... cols-1
+        #     cols ...
+        # --------------------------------------------------
+
+        node_row = (
+            node_ind // cols
+        )
+
+        node_col = (
+            node_ind % cols
+        )
+
+        # --------------------------------------------------
+        # COORDINATES OF ALL NEURONS
+        # --------------------------------------------------
+
+        indices = np.arange(
+            self.nnodes,
+            dtype=int,
+        )
+
+        all_rows = (
+            indices // cols
+        )
+
+        all_cols = (
+            indices % cols
+        )
+
+        # --------------------------------------------------
+        # CARTESIAN DISPLACEMENTS
+        # --------------------------------------------------
+
+        dx = (
+            all_cols
+            - node_col
+        )
+
+        dy = (
+            all_rows
+            - node_row
+        )
+
+        # --------------------------------------------------
+        # EUCLIDEAN GRID DISTANCE
+        #
+        # Horizontal / vertical:
+        #
+        #     distance = 1
+        #
+        # Diagonal:
+        #
+        #     distance = sqrt(2)
+        #
+        # This allows an 8-connected rectangular neighborhood
+        # while maintaining isotropic spatial geometry.
+        # --------------------------------------------------
+
+        dist = (
+            dx**2
+            + dy**2
+        )
 
         return dist
 
+
     def _rect_dist_tor(self, node_ind):
         """
-        Finds the matrix of distances from a neural network node to all
-        others, for a hexagonal lattice in a map with toroidal topology.
-        Args:
-            node_ind: Neural network node index, between 0 and nnodes-1.
+        Calculate grid distances for a rectangular toroidal SOM using
+        wrapped Euclidean distance.
 
-        Returns:
-            Returns the distances from this node to all other grid nodes, in a
-            toroidal map.
+        The IntraSOM map convention is:
 
+            mapsize = (columns, rows)
+
+        Neurons are stored using row-major indexing:
+
+            row = node_index // columns
+            col = node_index % columns
+
+        The rectangular lattice is treated as locally 8-connected:
+
+            NW    N    NE
+            \\  |  /
+            W --  X  -- E
+            /  |  \\
+            SW    S    SE
+
+        Orthogonal neighbors have Euclidean distance:
+
+            1.0
+
+        Diagonal neighbors have Euclidean distance:
+
+            sqrt(2)
+
+        Because the map topology is toroidal, the left and right borders are
+        connected and the top and bottom borders are connected.
+
+        Therefore, the displacement along each axis is calculated using the
+        shortest periodic path.
+
+        For columns:
+
+            dx = min(
+                abs(col - reference_col),
+                columns - abs(col - reference_col)
+            )
+
+        For rows:
+
+            dy = min(
+                abs(row - reference_row),
+                rows - abs(row - reference_row)
+            )
+
+        The final distance is:
+
+            sqrt(dx**2 + dy**2)
+
+        This means that neurons located diagonally across periodic borders
+        are correctly treated as local diagonal neighbors with distance
+        ``sqrt(2)``.
+
+        Example for a toroidal corner neuron:
+
+            X . . . W
+            . . . . .
+            . . . . .
+            N . . . NW
+
+        Here, the neurons represented by ``W`` and ``N`` are one periodic
+        step away, while ``NW`` is one wrapped diagonal away.
+
+        Using wrapped Euclidean distance avoids the square-shaped distance
+        bands produced by Chebyshev distance while preserving periodicity.
+
+        Parameters
+        ----------
+        node_ind : int
+            Linear index of the reference neuron.
+
+            Valid values are between:
+
+                0 and self.nnodes - 1
+
+        Returns
+        -------
+        numpy.ndarray
+            One-dimensional float array with shape ``(self.nnodes,)``.
+
+            Each element contains the shortest Euclidean distance between
+            ``node_ind`` and another neuron considering toroidal wrapping.
+
+            Typical values include:
+
+                same neuron              -> 0.0
+                orthogonal neighbor      -> 1.0
+                diagonal neighbor        -> sqrt(2)
+                wrapped neighbor         -> 1.0
+                wrapped diagonal         -> sqrt(2)
+
+        Notes
+        -----
+        The returned distances must remain floating-point values.
+
+        Do not convert the result to integer because diagonal distances
+        ``sqrt(2)`` would otherwise be truncated and become indistinguishable
+        from orthogonal distances.
+
+        When these distances are used for topographic-error calculation,
+        rectangular adjacency should consider neurons with distance less
+        than or equal to ``sqrt(2)``, rather than testing only
+        ``distance == 1``.
         """
-        rows, cols = self.mapsize
 
-        # Generate the xy coordinates of the BMUs for a rectangular grid
-        coordinates = self.generate_hex_lattice(rows, cols)
+        # --------------------------------------------------
+        # MAP GEOMETRY
+        #
+        # IntraSOM convention:
+        #
+        #     mapsize = (columns, rows)
+        # --------------------------------------------------
 
-        # Extends the distance search to the neighborhood created by the toroidal topology, creating periodicity of the data
-        toroid_neigh = [[0, 0], [cols, 0], [cols, rows], [0, -rows],
-            [-cols, 0], [0, -rows], [-cols, -rows]]
+        cols, rows = self.mapsize
 
-        # Calculate the distances in the toroidal topology, finding all possible distances according to toroid_neigh and
-        # selecting the smallest
-        dist = np.array(
-            [min([abs((coordinates[ind] + [neig]) - coordinates[node_ind]).sum()\
-             for neig in toroid_neigh]) for ind in range(len(coordinates))])
+        # --------------------------------------------------
+        # VALIDATE NODE INDEX
+        # --------------------------------------------------
+
+        if not 0 <= node_ind < self.nnodes:
+
+            raise IndexError(
+                f"node_ind must be between "
+                f"0 and {self.nnodes - 1}. "
+                f"Received: {node_ind}."
+            )
+
+        # --------------------------------------------------
+        # REFERENCE NEURON COORDINATES
+        # --------------------------------------------------
+
+        node_row = (
+            node_ind // cols
+        )
+
+        node_col = (
+            node_ind % cols
+        )
+
+        # --------------------------------------------------
+        # COORDINATES OF ALL NEURONS
+        # --------------------------------------------------
+
+        indices = np.arange(
+            self.nnodes,
+            dtype=int,
+        )
+
+        all_rows = (
+            indices // cols
+        )
+
+        all_cols = (
+            indices % cols
+        )
+
+        # --------------------------------------------------
+        # DIRECT DISPLACEMENTS
+        # --------------------------------------------------
+
+        dx = np.abs(
+            all_cols
+            - node_col
+        )
+
+        dy = np.abs(
+            all_rows
+            - node_row
+        )
+
+        # --------------------------------------------------
+        # SHORTEST TOROIDAL DISPLACEMENT
+        #
+        # Example:
+        #
+        # columns = 15
+        #
+        # col 0 and col 14:
+        #
+        # direct distance  = 14
+        # wrapped distance = 1
+        # --------------------------------------------------
+
+        # Shortest wrapped displacement on each axis.
+        dx = np.minimum(
+            dx,
+            cols - dx,
+        )
+
+        dy = np.minimum(
+            dy,
+            rows - dy,
+        )
+
+        # Squared Euclidean distance on the periodic rectangular grid.
+        dist = (
+            dx**2
+            + dy**2
+        )
 
         return dist
 
@@ -245,39 +774,70 @@ class Codebook(object):
 
     def _hexa_dist_tor(self, node_ind):
         """
-        Finds the Manhattan distance matrix (L1) of a neural network node
-        for all others, for a rectangular lattice in a map with
-        toroidal topology.
+        Calculates grid distances from one node to all other nodes
+        in a hexagonal lattice with toroidal topology.
 
-        Args:
-            node_ind: Neural network node index, between 0 and nnodes-1.
+        Parameters
+        ----------
+        node_ind : int
+            Node index between 0 and nnodes - 1.
 
-        Returns:
-            Returns an array of distances from this node to all other nodes in the
-            grid, in a toroidal map.
+        Returns
+        -------
+        numpy.ndarray
+            Minimum toroidal grid distance from node_ind
+            to every node.
         """
 
-        # Separate column and row values
+        # mapsize = (columns, rows)
         cols, rows = self.mapsize
 
-        # Generate the BMUs xyz coordinates for a hexagonal grid
-        coordinates = self.generate_oddr_cube_lattice(cols, rows)
-        
-        
-        # Extend the distance search to the neighborhood created by the toroidal
-        # topology, creating data periodicity
-        toroid_neigh = self.toroid_neighborhood(cols, rows)
+        # Validate node index
+        if not 0 <= node_ind < self.nnodes:
+            raise IndexError(
+                f"node_ind must be between 0 and "
+                f"{self.nnodes - 1}. "
+                f"Received: {node_ind}."
+            )
 
-        # Calculate the distances in the toroidal topology, finding all
-        # possible distances according to toroid_neigh and selecting the smallest
-        dist = np.zeros(((cols*rows),9))
-        for i in range(cols*rows):
-            if i >= node_ind:
-                for j, neig in enumerate(toroid_neigh):
-                    dist[i,j] = self.cube_distance(coordinates[i]+neig, coordinates[node_ind], dist_factor=self.dist_factor)
+        # Cubic coordinates for the odd-r hexagonal lattice
+        coordinates = self.generate_oddr_cube_lattice(
+            cols,
+            rows
+        )
 
+        # Periodic copies required by toroidal topology
+        toroid_neigh = self.toroid_neighborhood(
+            cols,
+            rows
+        )
 
-        return np.min(dist, axis=1).astype(int)
+        # One row per neuron and one column per
+        # periodic representation
+        dist = np.zeros(
+            (
+                self.nnodes,
+                len(toroid_neigh)
+            ),
+            dtype=float
+        )
+
+        # Calculate distances for ALL neurons
+        for i in range(self.nnodes):
+
+            for j, neig in enumerate(toroid_neigh):
+
+                dist[i, j] = self.cube_distance(
+                    coordinates[i] + neig,
+                    coordinates[node_ind],
+                    dist_factor=self.dist_factor
+                )
+
+        # Keep shortest toroidal path
+        return np.min(
+            dist,
+            axis=1
+        ).astype(int)
 
     def toroid_neighborhood(self, cols, rows):
         """

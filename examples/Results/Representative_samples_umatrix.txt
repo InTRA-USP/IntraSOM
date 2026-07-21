@@ -1,3 +1,16 @@
-BMU 283: Baboon
-BMU 322: Hummingbird
-BMU 238: Panther
+BMU 6: Horse, Zebra
+BMU 34: Cow
+BMU 45: Gorilla
+BMU 88: Duck
+BMU 99: Tiger
+BMU 127: Dog
+BMU 133: Goose
+BMU 164: Hen
+BMU 209: Dove
+BMU 216: Cat
+BMU 220: Wolf
+BMU 225: Fox
+BMU 253: Eagle
+BMU 285: Monkey
+BMU 305: Owl, Hawk
+BMU 313: Lion
