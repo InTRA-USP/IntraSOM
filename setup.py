@@ -23,7 +23,7 @@ long_description = (
 setup(
     name="IntraSOM",
 
-    version="1.1.0",
+    version="1.1.1",
 
     author=(
         "InTRA RDI Center "
