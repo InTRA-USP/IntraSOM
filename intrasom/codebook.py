@@ -267,39 +267,70 @@ class Codebook(object):
 
     def _hexa_dist_tor(self, node_ind):
         """
-        Finds the Manhattan distance matrix (L1) of a neural network node
-        for all others, for a rectangular lattice in a map with
-        toroidal topology.
+        Calculates grid distances from one node to all other nodes
+        in a hexagonal lattice with toroidal topology.
 
-        Args:
-            node_ind: Neural network node index, between 0 and nnodes-1.
+        Parameters
+        ----------
+        node_ind : int
+            Node index between 0 and nnodes - 1.
 
-        Returns:
-            Returns an array of distances from this node to all other nodes in the
-            grid, in a toroidal map.
+        Returns
+        -------
+        numpy.ndarray
+            Minimum toroidal grid distance from node_ind
+            to every node.
         """
 
-        # Separate column and row values
+        # mapsize = (columns, rows)
         cols, rows = self.mapsize
 
-        # Generate the BMUs xyz coordinates for a hexagonal grid
-        coordinates = self.generate_oddr_cube_lattice(cols, rows)
-        
-        
-        # Extend the distance search to the neighborhood created by the toroidal
-        # topology, creating data periodicity
-        toroid_neigh = self.toroid_neighborhood(cols, rows)
+        # Validate node index
+        if not 0 <= node_ind < self.nnodes:
+            raise IndexError(
+                f"node_ind must be between 0 and "
+                f"{self.nnodes - 1}. "
+                f"Received: {node_ind}."
+            )
 
-        # Calculate the distances in the toroidal topology, finding all
-        # possible distances according to toroid_neigh and selecting the smallest
-        dist = np.zeros(((cols*rows),9))
-        for i in range(cols*rows):
-            if i >= node_ind:
-                for j, neig in enumerate(toroid_neigh):
-                    dist[i,j] = self.cube_distance(coordinates[i]+neig, coordinates[node_ind], dist_factor=self.dist_factor)
+        # Cubic coordinates for the odd-r hexagonal lattice
+        coordinates = self.generate_oddr_cube_lattice(
+            cols,
+            rows
+        )
 
+        # Periodic copies required by toroidal topology
+        toroid_neigh = self.toroid_neighborhood(
+            cols,
+            rows
+        )
 
-        return np.min(dist, axis=1).astype(int)
+        # One row per neuron and one column per
+        # periodic representation
+        dist = np.zeros(
+            (
+                self.nnodes,
+                len(toroid_neigh)
+            ),
+            dtype=float
+        )
+
+        # Calculate distances for ALL neurons
+        for i in range(self.nnodes):
+
+            for j, neig in enumerate(toroid_neigh):
+
+                dist[i, j] = self.cube_distance(
+                    coordinates[i] + neig,
+                    coordinates[node_ind],
+                    dist_factor=self.dist_factor
+                )
+
+        # Keep shortest toroidal path
+        return np.min(
+            dist,
+            axis=1
+        ).astype(int)
 
     def toroid_neighborhood(self, cols, rows):
         """
