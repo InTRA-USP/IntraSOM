@@ -346,15 +346,175 @@ class SOM(object):
         self.mapshape = mapshape
         self.initialization = initialization
         
-        if mapsize:
-            if mapsize[1]%2!=0:
-                self.mapsize = (mapsize[0], mapsize[1]+1)
-                print(f"The number of lines cannot be odd.\
-                The map size has been changed to: {self.mapsize}")
-            else:
-                self.mapsize = mapsize
+        # --------------------------------------------------
+        # MAP SIZE
+        # Public convention:
+        #
+        # mapsize = (columns, rows)
+        # --------------------------------------------------
+
+        if mapsize is None:
+
+            self.mapsize = self._expected_mapsize(
+                self._data
+            )
+
+        elif isinstance(
+            mapsize,
+            (int, np.integer)
+        ):
+
+            # Integer mapsize is interpreted as the total
+            # desired number of neurons.
+            n_nodes = int(mapsize)
+
+            if n_nodes <= 0:
+                raise ValueError(
+                    "mapsize must contain a positive "
+                    "number of neurons."
+                )
+
+            # --------------------------------------------------
+            # Find all exact factor pairs:
+            #
+            # n_nodes = columns * rows
+            #
+            # Preference is given to the most square-like map.
+            # --------------------------------------------------
+
+            candidates = []
+
+            max_factor = int(
+                np.sqrt(n_nodes)
+            )
+
+            for factor in range(
+                1,
+                max_factor + 1
+            ):
+
+                if n_nodes % factor == 0:
+
+                    other = (
+                        n_nodes // factor
+                    )
+
+                    # mapsize convention:
+                    # (columns, rows)
+
+                    candidates.append(
+                        (
+                            other,
+                            factor
+                        )
+                    )
+
+                    if other != factor:
+
+                        candidates.append(
+                            (
+                                factor,
+                                other
+                            )
+                        )
+
+            # --------------------------------------------------
+            # Hexagonal toroidal maps require an even
+            # number of rows.
+            # --------------------------------------------------
+
+            if (
+                lattice == "hexa"
+                and
+                mapshape == "toroid"
+            ):
+
+                candidates = [
+                    candidate
+                    for candidate in candidates
+                    if candidate[1] % 2 == 0
+                ]
+
+                if not candidates:
+
+                    raise ValueError(
+                        f"Cannot create an exact "
+                        f"hexagonal toroidal map with "
+                        f"{n_nodes} neurons and an even "
+                        f"number of rows. "
+                        f"Provide mapsize=(columns, rows) "
+                        f"explicitly."
+                    )
+
+            # Choose the factor pair closest to a square
+            self.mapsize = min(
+                candidates,
+                key=lambda size: abs(
+                    size[0] - size[1]
+                )
+            )
+
+        elif isinstance(
+            mapsize,
+            (tuple, list, np.ndarray)
+        ):
+
+            if len(mapsize) != 2:
+
+                raise ValueError(
+                    "mapsize must contain exactly "
+                    "two values in the format "
+                    "(columns, rows)."
+                )
+
+            cols = int(
+                mapsize[0]
+            )
+
+            rows = int(
+                mapsize[1]
+            )
+
+            if cols <= 0 or rows <= 0:
+
+                raise ValueError(
+                    "The number of columns and rows "
+                    "must be greater than zero."
+                )
+
+            # Only hexagonal toroidal maps require
+            # an even number of rows.
+            if (
+                lattice == "hexa"
+                and
+                mapshape == "toroid"
+                and
+                rows % 2 != 0
+            ):
+
+                rows += 1
+
+                print(
+                    "Hexagonal toroidal maps require "
+                    "an even number of rows. "
+                    f"The map size has been changed to "
+                    f"({cols}, {rows})."
+                )
+
+            self.mapsize = (
+                cols,
+                rows
+            )
+
         else:
-            self.mapsize = self._expected_mapsize(self._data)
+
+            raise TypeError(
+                "mapsize must be None, an integer, "
+                "or a tuple/list in the format "
+                "(columns, rows)."
+            )
+
+
         self.QE = 0
         self.QE_expanded = np.zeros(self._dlen)
 
