@@ -1,0 +1,37 @@
+IntraSOM Training Report
+Project: validation_15x20_hexa_toroid
+
+Input Data:
+Features: 13
+Samples: 18
+Cells: 234
+
+--------------------------------------------------
+Initialization Parameters:
+
+Map Size: 15 columns and 20 lines
+Training Polygon: Toroid
+Lattice: Hexagonal
+Normalization: Variance
+Initialization: None
+Neighborhood Function: Gaussian
+Number of Labels: 0
+
+--------------------------------------------------
+Training Parameters:
+
+Rough Training:
+Size: 8
+Initial Ratio: 5.0
+Final Ratio: 2.0
+
+Finetube Training:
+Size: 12
+Initial Ratio: 2.0
+Final Ratio: 1.0
+
+--------------------------------------------------
+Training Evaluation:
+
+Quantization Error: 0.0059
+Topographic Error: 0.0

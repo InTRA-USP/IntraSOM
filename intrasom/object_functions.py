@@ -36,7 +36,7 @@ class GaussianNeighborhood(object):
         return np.exp(-1.0*distance_matrix/(2.0*radius**2)).reshape(dim, dim)
 
     def __call__(self, *args, **kwargs):
-        return self.calculate(*args)
+        return self.calculate(*args, **kwargs)
 
 
 class BubbleNeighborhood(object):
@@ -54,7 +54,7 @@ class BubbleNeighborhood(object):
                  np.sqrt(distance_matrix.flatten())).reshape(dim, dim) + small
 
     def __call__(self, *args, **kwargs):
-        return self.calculate(*args)
+        return self.calculate(*args, **kwargs)
     
 
 

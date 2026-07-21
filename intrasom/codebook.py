@@ -369,79 +369,381 @@ class Codebook(object):
 
     def _rect_dist_plan(self, node_ind):
         """
-        Calculates Manhattan distances from one node to all other nodes
-        in a rectangular lattice with planar topology.
+        Calculate grid distances for a rectangular planar SOM using
+        Euclidean distance between neuron coordinates.
+
+        The IntraSOM map convention is:
+
+            mapsize = (columns, rows)
+
+        Neurons are stored using row-major indexing:
+
+            row = node_index // columns
+            col = node_index % columns
+
+        In a rectangular lattice, the eight surrounding neurons belong to
+        the local 8-connected neighborhood. However, their spatial distances
+        are not forced to be identical.
+
+        Orthogonal neighbors have distance:
+
+            1.0
+
+        Diagonal neighbors have distance:
+
+            sqrt(2)
+
+        For example:
+
+                sqrt(2)    1    sqrt(2)
+
+                    \\    |    /
+
+                1 -------- X -------- 1
+
+                    /    |    \\
+
+                sqrt(2)    1    sqrt(2)
+
+        Using Euclidean grid distance instead of Manhattan or Chebyshev
+        distance produces a more isotropic neighborhood during SOM training.
+
+        This is particularly important when a Gaussian neighborhood function
+        is used, because influence then decreases according to the actual
+        geometric distance from the BMU rather than forming diamond-shaped
+        (Manhattan) or square-shaped (Chebyshev) distance bands.
 
         Parameters
         ----------
         node_ind : int
-            Node index between 0 and nnodes - 1.
+            Linear index of the reference neuron.
+
+            Valid values are between:
+
+                0 and self.nnodes - 1
 
         Returns
         -------
         numpy.ndarray
-            Manhattan distance from node_ind to every node.
+            One-dimensional float array with shape ``(self.nnodes,)``.
+
+            Each element contains the Euclidean grid distance between
+            ``node_ind`` and the corresponding neuron.
+
+            Examples of returned distances:
+
+                same neuron          -> 0.0
+                horizontal neighbor  -> 1.0
+                vertical neighbor    -> 1.0
+                diagonal neighbor    -> sqrt(2)
+                two horizontal steps -> 2.0
+
+        Notes
+        -----
+        This function returns floating-point distances.
+
+        Do not cast the result to integer, because doing so would collapse
+        diagonal distance ``sqrt(2)`` into ``1`` and destroy the intended
+        Euclidean geometry of the rectangular lattice.
         """
 
-        # mapsize = (columns, rows)
+        # --------------------------------------------------
+        # MAP GEOMETRY
+        #
+        # IntraSOM convention:
+        #
+        #     mapsize = (columns, rows)
+        # --------------------------------------------------
+
         cols, rows = self.mapsize
 
-        # generate_rec_lattice expects (n_rows, n_columns)
-        coordinates = self.generate_rec_lattice(
-            rows,
-            cols
+        # --------------------------------------------------
+        # VALIDATE NODE INDEX
+        # --------------------------------------------------
+
+        if not 0 <= node_ind < self.nnodes:
+
+            raise IndexError(
+                f"node_ind must be between "
+                f"0 and {self.nnodes - 1}. "
+                f"Received: {node_ind}."
+            )
+
+        # --------------------------------------------------
+        # REFERENCE NEURON COORDINATES
+        #
+        # Row-major indexing:
+        #
+        #     0   1   2   ... cols-1
+        #     cols ...
+        # --------------------------------------------------
+
+        node_row = (
+            node_ind // cols
         )
 
-        dist = np.array([
-            np.abs(
-                coordinates[ind]
-                - coordinates[node_ind]
-            ).sum()
-            for ind in range(len(coordinates))
-        ])
+        node_col = (
+            node_ind % cols
+        )
+
+        # --------------------------------------------------
+        # COORDINATES OF ALL NEURONS
+        # --------------------------------------------------
+
+        indices = np.arange(
+            self.nnodes,
+            dtype=int,
+        )
+
+        all_rows = (
+            indices // cols
+        )
+
+        all_cols = (
+            indices % cols
+        )
+
+        # --------------------------------------------------
+        # CARTESIAN DISPLACEMENTS
+        # --------------------------------------------------
+
+        dx = (
+            all_cols
+            - node_col
+        )
+
+        dy = (
+            all_rows
+            - node_row
+        )
+
+        # --------------------------------------------------
+        # EUCLIDEAN GRID DISTANCE
+        #
+        # Horizontal / vertical:
+        #
+        #     distance = 1
+        #
+        # Diagonal:
+        #
+        #     distance = sqrt(2)
+        #
+        # This allows an 8-connected rectangular neighborhood
+        # while maintaining isotropic spatial geometry.
+        # --------------------------------------------------
+
+        dist = (
+            dx**2
+            + dy**2
+        )
 
         return dist
 
+
     def _rect_dist_tor(self, node_ind):
         """
-        Calculates Manhattan distances from one node to all other nodes
-        in a rectangular lattice with toroidal topology.
+        Calculate grid distances for a rectangular toroidal SOM using
+        wrapped Euclidean distance.
+
+        The IntraSOM map convention is:
+
+            mapsize = (columns, rows)
+
+        Neurons are stored using row-major indexing:
+
+            row = node_index // columns
+            col = node_index % columns
+
+        The rectangular lattice is treated as locally 8-connected:
+
+            NW    N    NE
+            \\  |  /
+            W --  X  -- E
+            /  |  \\
+            SW    S    SE
+
+        Orthogonal neighbors have Euclidean distance:
+
+            1.0
+
+        Diagonal neighbors have Euclidean distance:
+
+            sqrt(2)
+
+        Because the map topology is toroidal, the left and right borders are
+        connected and the top and bottom borders are connected.
+
+        Therefore, the displacement along each axis is calculated using the
+        shortest periodic path.
+
+        For columns:
+
+            dx = min(
+                abs(col - reference_col),
+                columns - abs(col - reference_col)
+            )
+
+        For rows:
+
+            dy = min(
+                abs(row - reference_row),
+                rows - abs(row - reference_row)
+            )
+
+        The final distance is:
+
+            sqrt(dx**2 + dy**2)
+
+        This means that neurons located diagonally across periodic borders
+        are correctly treated as local diagonal neighbors with distance
+        ``sqrt(2)``.
+
+        Example for a toroidal corner neuron:
+
+            X . . . W
+            . . . . .
+            . . . . .
+            N . . . NW
+
+        Here, the neurons represented by ``W`` and ``N`` are one periodic
+        step away, while ``NW`` is one wrapped diagonal away.
+
+        Using wrapped Euclidean distance avoids the square-shaped distance
+        bands produced by Chebyshev distance while preserving periodicity.
 
         Parameters
         ----------
         node_ind : int
-            Node index between 0 and nnodes - 1.
+            Linear index of the reference neuron.
+
+            Valid values are between:
+
+                0 and self.nnodes - 1
 
         Returns
         -------
         numpy.ndarray
-            Distance from node_ind to every node in the toroidal
-            rectangular grid.
+            One-dimensional float array with shape ``(self.nnodes,)``.
+
+            Each element contains the shortest Euclidean distance between
+            ``node_ind`` and another neuron considering toroidal wrapping.
+
+            Typical values include:
+
+                same neuron              -> 0.0
+                orthogonal neighbor      -> 1.0
+                diagonal neighbor        -> sqrt(2)
+                wrapped neighbor         -> 1.0
+                wrapped diagonal         -> sqrt(2)
+
+        Notes
+        -----
+        The returned distances must remain floating-point values.
+
+        Do not convert the result to integer because diagonal distances
+        ``sqrt(2)`` would otherwise be truncated and become indistinguishable
+        from orthogonal distances.
+
+        When these distances are used for topographic-error calculation,
+        rectangular adjacency should consider neurons with distance less
+        than or equal to ``sqrt(2)``, rather than testing only
+        ``distance == 1``.
         """
+
+        # --------------------------------------------------
+        # MAP GEOMETRY
+        #
+        # IntraSOM convention:
+        #
+        #     mapsize = (columns, rows)
+        # --------------------------------------------------
 
         cols, rows = self.mapsize
 
-        # Convert linear index to row/column coordinates
-        node_row = node_ind // cols
-        node_col = node_ind % cols
+        # --------------------------------------------------
+        # VALIDATE NODE INDEX
+        # --------------------------------------------------
 
-        dist = np.zeros(self.nnodes, dtype=int)
+        if not 0 <= node_ind < self.nnodes:
 
-        for ind in range(self.nnodes):
+            raise IndexError(
+                f"node_ind must be between "
+                f"0 and {self.nnodes - 1}. "
+                f"Received: {node_ind}."
+            )
 
-            row = ind // cols
-            col = ind % cols
+        # --------------------------------------------------
+        # REFERENCE NEURON COORDINATES
+        # --------------------------------------------------
 
-            # Direct distances
-            dx = abs(col - node_col)
-            dy = abs(row - node_row)
+        node_row = (
+            node_ind // cols
+        )
 
-            # Toroidal shortest distances
-            dx = min(dx, cols - dx)
-            dy = min(dy, rows - dy)
+        node_col = (
+            node_ind % cols
+        )
 
-            # Manhattan distance
-            dist[ind] = dx + dy
+        # --------------------------------------------------
+        # COORDINATES OF ALL NEURONS
+        # --------------------------------------------------
+
+        indices = np.arange(
+            self.nnodes,
+            dtype=int,
+        )
+
+        all_rows = (
+            indices // cols
+        )
+
+        all_cols = (
+            indices % cols
+        )
+
+        # --------------------------------------------------
+        # DIRECT DISPLACEMENTS
+        # --------------------------------------------------
+
+        dx = np.abs(
+            all_cols
+            - node_col
+        )
+
+        dy = np.abs(
+            all_rows
+            - node_row
+        )
+
+        # --------------------------------------------------
+        # SHORTEST TOROIDAL DISPLACEMENT
+        #
+        # Example:
+        #
+        # columns = 15
+        #
+        # col 0 and col 14:
+        #
+        # direct distance  = 14
+        # wrapped distance = 1
+        # --------------------------------------------------
+
+        # Shortest wrapped displacement on each axis.
+        dx = np.minimum(
+            dx,
+            cols - dx,
+        )
+
+        dy = np.minimum(
+            dy,
+            rows - dy,
+        )
+
+        # Squared Euclidean distance on the periodic rectangular grid.
+        dist = (
+            dx**2
+            + dy**2
+        )
 
         return dist
 

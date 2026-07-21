@@ -203,7 +203,10 @@ class PlotFactory:
         if lattice == "hexa":
             # Preserve the historical RegularPolygon orientation used by
             # visualization.py while generating all polygons vectorially.
-            angles = np.arange(6, dtype=float) * (2.0 * np.pi / 6.0)
+            angles = (
+                np.pi / 2.0
+                + np.arange(6, dtype=float) * (2.0 * np.pi / 6.0)
+            )
             radius = (1.0 / np.sqrt(3.0)) * sizes
             offsets = np.stack(
                 [np.cos(angles), np.sin(angles)],
@@ -371,22 +374,53 @@ class PlotFactory:
         ax.set_aspect("equal", adjustable="box")
         ax.set_axis_off()
 
-    def _umatrix_geometry(self, um, umat):
+    def _umatrix_geometry(
+        self,
+        um,
+        umat,
+        *,
+        include_toroid_wrap=False,
+    ):
         """
         Convert reduced and expanded U-Matrix arrays into drawable cells.
 
         ``build_umatrix`` is expected to return:
             hexa -> expanded shape (rows, cols, 6)
-            rect -> expanded shape (rows, cols, 4)
+            rect -> expanded shape (rows, cols, 8)
 
-        Only one copy of each undirected edge is drawn:
-            hexa -> neighbor slots 0, 1, 2
-            rect -> neighbor slots 0, 1
+        Only one copy of each undirected relation is drawn:
+            hexa -> right, down-right, down-left
+            rect -> right, down-right, down, down-left
+
+        Important for toroidal maps
+        ---------------------------
+        A flat 2-D U-Matrix must not draw wrap-around relations as ordinary
+        cells *outside* the fundamental map rectangle. Doing so creates the
+        visual artifact where every interstitial/alternate row appears shifted
+        left or right.
+
+        Therefore:
+            include_toroid_wrap=False
+                Used by the ordinary 2-D U-Matrix. Wrap-crossing edge cells
+                are omitted from the flat representation.
+
+            include_toroid_wrap=True
+                Used only by the torus texture renderer, where periodic
+                relations are required and the geometry is tiled/cropped.
         """
-        um = np.asarray(um, dtype=float)
-        umat = np.asarray(umat, dtype=float)
+        um = np.asarray(
+            um,
+            dtype=float,
+        )
+        umat = np.asarray(
+            umat,
+            dtype=float,
+        )
 
-        expected_umat = (self.rows, self.cols)
+        expected_umat = (
+            self.rows,
+            self.cols,
+        )
 
         if umat.shape != expected_umat:
             raise ValueError(
@@ -394,7 +428,12 @@ class PlotFactory:
                 f"Received {umat.shape}, expected {expected_umat}."
             )
 
-        expected_neighbors = 6 if self.lattice == "hexa" else 4
+        expected_neighbors = (
+            6
+            if self.lattice == "hexa"
+            else 8
+        )
+
         expected_um = (
             self.rows,
             self.cols,
@@ -416,45 +455,192 @@ class PlotFactory:
                 (2.0 * yy).ravel(),
             ]
         )
+
         node_values = umat.ravel()
 
+        row_grid, col_grid = np.indices(
+            (
+                self.rows,
+                self.cols,
+            ),
+            dtype=int,
+        )
+
         if self.lattice == "hexa":
-            # Same three unique directions historically drawn by the
-            # hexagonal U-Matrix implementation.
+
+            # Expanded U-Matrix slots:
+            #   0 = right
+            #   1 = down-right
+            #   2 = down-left
+            #
+            # The actual column step depends on odd-r row parity, while the
+            # geometric midpoint offsets remain +/-0.5 after the node
+            # coordinates are doubled.
             offsets = np.array(
                 [
                     [1.0, 0.0],
-                    [0.5, np.sqrt(3.0) / 2.0],
-                    [-0.5, np.sqrt(3.0) / 2.0],
+                    [
+                        0.5,
+                        np.sqrt(3.0) / 2.0,
+                    ],
+                    [
+                        -0.5,
+                        np.sqrt(3.0) / 2.0,
+                    ],
                 ],
                 dtype=float,
             )
-            neighbor_slots = (0, 1, 2)
+
+            neighbor_slots = (
+                0,
+                1,
+                2,
+            )
+
+            even_rows = (
+                row_grid % 2
+            ) == 0
+
+            neighbor_steps = (
+                (
+                    np.ones_like(col_grid),
+                    np.zeros_like(row_grid),
+                ),
+                (
+                    np.where(
+                        even_rows,
+                        0,
+                        1,
+                    ),
+                    np.ones_like(row_grid),
+                ),
+                (
+                    np.where(
+                        even_rows,
+                        -1,
+                        0,
+                    ),
+                    np.ones_like(row_grid),
+                ),
+            )
+
         else:
-            # build_umatrix rectangular order:
-            # 0=right, 1=bottom, 2=left, 3=top.
-            # Drawing right and bottom once represents every undirected edge.
+
+            # Expanded rectangular U-Matrix slots:
+            #   0 = right
+            #   1 = down-right
+            #   2 = down
+            #   3 = down-left
             offsets = np.array(
                 [
                     [1.0, 0.0],
+                    [1.0, 1.0],
                     [0.0, 1.0],
+                    [-1.0, 1.0],
                 ],
                 dtype=float,
             )
-            neighbor_slots = (0, 1)
+
+            neighbor_slots = (
+                0,
+                1,
+                2,
+                3,
+            )
+
+            neighbor_steps = (
+                (
+                    np.ones_like(col_grid),
+                    np.zeros_like(row_grid),
+                ),
+                (
+                    np.ones_like(col_grid),
+                    np.ones_like(row_grid),
+                ),
+                (
+                    np.zeros_like(col_grid),
+                    np.ones_like(row_grid),
+                ),
+                (
+                    -np.ones_like(col_grid),
+                    np.ones_like(row_grid),
+                ),
+            )
 
         edge_centers = []
         edge_values = []
 
-        for offset, slot in zip(offsets, neighbor_slots):
-            values = um[:, :, slot].ravel()
-            edge_centers.append(
-                node_centers + offset
-            )
-            edge_values.append(values)
+        for (
+            offset,
+            slot,
+            (
+                step_x,
+                step_y,
+            ),
+        ) in zip(
+            offsets,
+            neighbor_slots,
+            neighbor_steps,
+        ):
 
-        edge_centers = np.vstack(edge_centers)
-        edge_values = np.concatenate(edge_values)
+            values = np.array(
+                um[:, :, slot],
+                dtype=float,
+                copy=True,
+            )
+
+            # In a planar U-Matrix, build_umatrix already returns NaN for
+            # relations outside the map. For a toroidal map those relations
+            # are finite because the neighbor wraps to the opposite border.
+            #
+            # In the ordinary 2-D view, suppress only those wrap-crossing
+            # relations so they are not drawn one cell outside the map.
+            if (
+                self.mapshape == "toroid"
+                and not include_toroid_wrap
+            ):
+                neighbor_rows = (
+                    row_grid
+                    + step_y
+                )
+                neighbor_cols = (
+                    col_grid
+                    + step_x
+                )
+
+                inside_flat_domain = (
+                    (neighbor_rows >= 0)
+                    & (
+                        neighbor_rows
+                        < self.rows
+                    )
+                    & (neighbor_cols >= 0)
+                    & (
+                        neighbor_cols
+                        < self.cols
+                    )
+                )
+
+                values[
+                    ~inside_flat_domain
+                ] = np.nan
+
+            edge_centers.append(
+                node_centers
+                + offset
+            )
+
+            edge_values.append(
+                values.ravel()
+            )
+
+        edge_centers = np.vstack(
+            edge_centers
+        )
+
+        edge_values = np.concatenate(
+            edge_values
+        )
 
         return (
             node_centers,
@@ -496,7 +682,11 @@ class PlotFactory:
             node_values,
             edge_centers,
             edge_values,
-        ) = self._umatrix_geometry(um, umat)
+        ) = self._umatrix_geometry(
+            um,
+            umat,
+            include_toroid_wrap=True,
+        )
 
         if self.lattice == "hexa":
             period_x = 2.0 * self.cols
@@ -534,11 +724,33 @@ class PlotFactory:
             len(translations)
         )
 
+        # Render the texture with the same physical aspect ratio as one
+        # periodic map tile. A square Matplotlib canvas combined with
+        # ``ax.set_aspect("equal")`` creates white letterbox margins for
+        # non-square maps; those margins become a white sector on the torus.
+        requested_w = float(figsize[0])
+        requested_h = float(figsize[1])
+        max_side = max(requested_w, requested_h)
+
+        if period_x >= period_y:
+            texture_figsize = (
+                max_side,
+                max_side * period_y / period_x,
+            )
+        else:
+            texture_figsize = (
+                max_side * period_x / period_y,
+                max_side,
+            )
+
         fig, ax = plt.subplots(
-            figsize=figsize,
+            figsize=texture_figsize,
             dpi=180,
         )
-        ax.set_aspect("equal")
+        ax.set_aspect(
+            "equal",
+            adjustable="box",
+        )
 
         self._add_value_cells(
             ax,
@@ -602,6 +814,8 @@ class PlotFactory:
             crop_y0,
         )
         ax.set_axis_off()
+        ax.set_facecolor("none")
+        fig.patch.set_alpha(0.0)
         fig.subplots_adjust(
             left=0,
             right=1,
@@ -684,7 +898,9 @@ class PlotFactory:
             ]
         )
         norm = self._safe_norm(all_values)
-        cmap_obj = mpl.colormaps[cmap]
+        # IntraSOM visualization standard: always use JET.
+        # ``cmap`` is retained only for backward API compatibility.
+        cmap_obj = mpl.colormaps["jet"]
 
         if resume:
             image = self._plot_umatrix_texture(
@@ -722,6 +938,7 @@ class PlotFactory:
         ) = self._umatrix_geometry(
             um,
             umat,
+            include_toroid_wrap=False,
         )
 
         fig = plt.figure(
@@ -1024,7 +1241,9 @@ class PlotFactory:
                     zorder=6,
                 )
 
-        # Limits are derived from actual geometry, not rows/cols formulas.
+        # Limits are derived from the flat-domain geometry only.
+        # Toroidal wrap-crossing cells were filtered above, preventing
+        # alternate/interstitial rows from extending beyond the map borders.
         all_centers = np.vstack(
             [
                 node_centers,
@@ -1033,10 +1252,50 @@ class PlotFactory:
                 ],
             ]
         )
+        # Base U-Matrix cells need ~0.6 map units of padding. Hits can be
+        # scaled up to 2x, so their vertices may extend farther than the
+        # U-Matrix centers, especially at the outer border.
+        map_pad = 0.8
+
+        if hits:
+            hit_sizes_for_limits = self.hits_dictionary
+
+            if hit_sizes_for_limits:
+                max_hit_scale = float(
+                    max(
+                        hit_sizes_for_limits.values()
+                    )
+                )
+
+                if self.lattice == "hexa":
+                    # Pointy-top hexagon: maximum vertical radius.
+                    overlay_extent = (
+                        max_hit_scale
+                        / np.sqrt(3.0)
+                    )
+                else:
+                    # Square: half side length.
+                    overlay_extent = (
+                        0.5
+                        * max_hit_scale
+                    )
+
+                map_pad = max(
+                    map_pad,
+                    overlay_extent + 0.25,
+                )
+
+        if samples_label:
+            # Leave room for annotation boxes close to the outer border.
+            map_pad = max(
+                map_pad,
+                1.35,
+            )
+
         self._set_map_limits(
             ax,
             all_centers,
-            pad=0.8,
+            pad=map_pad,
             invert_y=True,
         )
 
@@ -1220,7 +1479,9 @@ class PlotFactory:
         values = bmu_var.ravel()
 
         norm = self._safe_norm(values)
-        cmap_obj = mpl.colormaps[cmap]
+        # IntraSOM visualization standard: always use JET.
+        # ``cmap`` is retained only for backward API compatibility.
+        cmap_obj = mpl.colormaps["jet"]
 
         fig = plt.figure(
             figsize=figsize,
@@ -1675,6 +1936,8 @@ class PlotFactory:
         figsize=(10, 10),
         title_size=24,
         fontsize=10,
+        alpha_even_rows=0.30,
+        alpha_odd_rows=0.80,
         save=False,
         file_name=None,
         file_path=False,
@@ -1726,10 +1989,22 @@ class PlotFactory:
         colors = cmap(
             norm(base)
         )
+        alpha_even_rows = float(alpha_even_rows)
+        alpha_odd_rows = float(alpha_odd_rows)
+
+        for value, name in (
+            (alpha_even_rows, "alpha_even_rows"),
+            (alpha_odd_rows, "alpha_odd_rows"),
+        ):
+            if not 0.0 <= value <= 1.0:
+                raise ValueError(
+                    f"{name} must be between 0 and 1. Received {value}."
+                )
+
         colors[:, 3] = np.where(
             row_ids % 2 == 0,
-            0.3,
-            0.8,
+            alpha_even_rows,
+            alpha_odd_rows,
         )
 
         fig, ax = plt.subplots(
@@ -1744,6 +2019,10 @@ class PlotFactory:
             facecolors=colors,
             edgecolors="gray",
             linewidths=0.6,
+            # Preserve the per-face alpha values already stored in ``colors``.
+            # Passing alpha=1.0 here would overwrite all row-specific
+            # transparency values inside Matplotlib's PolyCollection.
+            alpha=None,
             zorder=1,
         )
 
@@ -1985,6 +2264,19 @@ class PlotFactory:
             resume=True,
         )
 
+        # Keep the texture orientation stable without tying it to
+        # mapsize[0]/mapsize[1]. Rotate BEFORE calculating the target
+        # resolution so the texture aspect ratio is preserved.
+        if (
+            mat_im.shape[0]
+            > mat_im.shape[1]
+        ):
+            mat_im = rotate(
+                mat_im,
+                90,
+                reshape=True,
+            )
+
         y_res = max(
             2,
             int(
@@ -1999,18 +2291,6 @@ class PlotFactory:
                 / red_factor
             ),
         )
-
-        # Keep the texture orientation stable without tying it to
-        # mapsize[0]/mapsize[1].
-        if (
-            mat_im.shape[0]
-            > mat_im.shape[1]
-        ):
-            mat_im = rotate(
-                mat_im,
-                90,
-                reshape=True,
-            )
 
         mat_res = resize(
             mat_im,
@@ -2048,11 +2328,13 @@ class PlotFactory:
                     0,
                     2 * pi,
                     cols,
+                    endpoint=False,
                 ),
                 np.linspace(
                     0,
                     2 * pi,
                     rows,
+                    endpoint=False,
                 ),
             )
 
@@ -2094,6 +2376,7 @@ class PlotFactory:
             mat_res,
             n_colors=n_colors,
             n_training_pixels=n_training_pixels,
+            periodic=True,
         )
 
         fig = go.Figure()
@@ -2101,7 +2384,7 @@ class PlotFactory:
         fig.add_mesh3d(
             x=x.ravel(),
             y=y.ravel(),
-            z=np.flipud(z).ravel(),
+            z=z.ravel(),
             i=I,
             j=J,
             k=K,
@@ -2109,6 +2392,15 @@ class PlotFactory:
             intensitymode="cell",
             colorscale=pl_colorscale,
             showscale=False,
+            flatshading=False,
+            lighting=dict(
+                ambient=1.0,
+                diffuse=0.0,
+                specular=0.0,
+                roughness=1.0,
+                fresnel=0.0,
+            ),
+            hoverinfo="skip",
         )
 
         fig.update_layout(
@@ -2129,7 +2421,10 @@ class PlotFactory:
                 xaxis_visible=False,
                 yaxis_visible=False,
                 zaxis_visible=False,
+                bgcolor="white",
             ),
+            paper_bgcolor="white",
+            plot_bgcolor="white",
             scene_aspectmode="data",
         )
 
@@ -2141,6 +2436,7 @@ class PlotFactory:
         img,
         n_colors=32,
         n_training_pixels=800,
+        periodic=False,
     ):
         """
         Convert an RGB image to triangle indices and color intensities.
@@ -2156,10 +2452,16 @@ class PlotFactory:
 
         rows, cols = z_data.shape
 
-        triangles = self.regular_tri(
-            rows,
-            cols,
-        )
+        if periodic:
+            triangles = self.periodic_tri(
+                rows,
+                cols,
+            )
+        else:
+            triangles = self.regular_tri(
+                rows,
+                cols,
+            )
 
         I, J, K = triangles.T
 
@@ -2168,18 +2470,29 @@ class PlotFactory:
             triangles
         ]
 
-        parity = (
-            np.arange(
-                zc.shape[0]
+        # IMPORTANT:
+        # ``z_data`` contains normalized MiniBatchKMeans cluster IDs.
+        # These IDs are categorical labels whose numerical order is arbitrary.
+        # Averaging them creates colors that do not correspond to any actual
+        # texture color and produces striped/mosaic artifacts on the torus.
+        #
+        # For periodic meshes, always use a REAL palette label from the
+        # triangle rather than an arithmetic mean of cluster labels.
+        if periodic:
+            tri_color_intensity = zc[:, 0]
+        else:
+            parity = (
+                np.arange(
+                    zc.shape[0]
+                )
+                % 2
             )
-            % 2
-        )
 
-        tri_color_intensity = np.where(
-            parity == 0,
-            zc[:, 1],
-            zc[:, 2],
-        )
+            tri_color_intensity = np.where(
+                parity == 0,
+                zc[:, 1],
+                zc[:, 2],
+            )
 
         return (
             I,
@@ -2188,6 +2501,89 @@ class PlotFactory:
             tri_color_intensity,
             pl_colorscale,
         )
+
+    @staticmethod
+    def periodic_tri(
+        rows,
+        cols,
+    ):
+        """
+        Triangulate a rows x cols grid with periodic wrapping in both axes.
+
+        Unlike :meth:`regular_tri`, this closes the last column onto the first
+        and the last row onto the first. This is the correct topology for a
+        torus and prevents an open white seam/sector.
+        """
+        rows = int(rows)
+        cols = int(cols)
+
+        if rows < 2 or cols < 2:
+            return np.empty(
+                (
+                    0,
+                    3,
+                ),
+                dtype=int,
+            )
+
+        rr, cc = np.meshgrid(
+            np.arange(rows, dtype=int),
+            np.arange(cols, dtype=int),
+            indexing="ij",
+        )
+
+        r1 = (
+            rr + 1
+        ) % rows
+        c1 = (
+            cc + 1
+        ) % cols
+
+        a = (
+            rr * cols
+            + cc
+        ).ravel()
+        b = (
+            rr * cols
+            + c1
+        ).ravel()
+        d = (
+            r1 * cols
+            + cc
+        ).ravel()
+        e = (
+            r1 * cols
+            + c1
+        ).ravel()
+
+        tri1 = np.column_stack(
+            [
+                a,
+                d,
+                e,
+            ]
+        )
+        tri2 = np.column_stack(
+            [
+                a,
+                e,
+                b,
+            ]
+        )
+
+        triangles = np.empty(
+            (
+                2 * rows * cols,
+                3,
+            ),
+            dtype=int,
+        )
+
+        triangles[0::2] = tri1
+        triangles[1::2] = tri2
+
+        return triangles
+
 
     @staticmethod
     def regular_tri(
@@ -2356,17 +2752,23 @@ class PlotFactory:
                 dtype=float,
             )
             rgb_color = tuple(
-                (
-                    color * 255
-                ).astype(
-                    np.uint8
-                )
+                int(v)
+                for v in np.clip(
+                    color * 255,
+                    0,
+                    255,
+                ).astype(np.uint8)
+            )
+            color_string = (
+                f"rgb({rgb_color[0]}, "
+                f"{rgb_color[1]}, "
+                f"{rgb_color[2]})"
             )
             return (
                 z_vals,
                 [
-                    [0.0, f"rgb{rgb_color}"],
-                    [1.0, f"rgb{rgb_color}"],
+                    [0.0, color_string],
+                    [1.0, color_string],
                 ],
             )
 
@@ -2418,7 +2820,11 @@ class PlotFactory:
         pl_colorscale = [
             [
                 float(scale_value),
-                f"rgb{tuple(color)}",
+                (
+                    f"rgb({int(color[0])}, "
+                    f"{int(color[1])}, "
+                    f"{int(color[2])})"
+                ),
             ]
             for scale_value, color in zip(
                 scale,
