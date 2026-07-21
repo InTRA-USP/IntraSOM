@@ -3,6 +3,7 @@ import sys
 import tempfile
 import os
 import itertools
+import warnings
 import numpy as np
 from multiprocessing.dummy import Pool
 from multiprocessing import cpu_count
@@ -16,6 +17,17 @@ import pandas as pd
 import json
 from tqdm.auto import tqdm
 from scipy.ndimage import shift
+
+try:
+    import psutil
+except ImportError:  # optional dependency
+    psutil = None
+
+try:
+    from threadpoolctl import threadpool_limits, threadpool_info
+except ImportError:  # optional dependency
+    threadpool_limits = None
+    threadpool_info = None
 
 # Plots
 import matplotlib.pyplot as plt
@@ -47,10 +59,12 @@ class SOMFactory(object):
               missing=False,
               pred_size=0,
               dist_factor = 2, 
-              pace_size=500,
+              pace_size=None,
               feature_weights=None,
+              faster=False,
+              faster_config=None,
               bmu_compute_dtype='preserve',
-              bmu_max_memory_mb=256,
+              bmu_max_memory_mb=None,
               bmu_config=None):
         """
 
@@ -131,6 +145,16 @@ class SOMFactory(object):
                 map will converge. Attention should be addressed in fast convergions
                 and lack o convergence dute to small dist_factor. Default:2.
 
+            faster: if True, activates the optimized exact-BMU profile for large,
+                complete datasets. It automatically selects a safe memory budget,
+                sample/neuron blocks, float32 BMU computation, and BLAS threads.
+                The default is False to preserve the historical behavior.
+
+            faster_config: optional dictionary for advanced fast-mode tuning.
+                Supported keys are: ram_usage_fraction, min_system_reserve_gb,
+                memory_safety_factor, sample_block_cap, target_neuron_block,
+                blas_threads, force_two_axis_blocking, and verbose.
+
         Returns:
             SOM object with all its inherited methods and attributes.
 
@@ -185,6 +209,8 @@ class SOMFactory(object):
                    dist_factor = dist_factor,
                    pace_size=pace_size,
                    feature_weights=feature_weights,
+                   faster=faster,
+                   faster_config=faster_config,
                    bmu_compute_dtype=bmu_compute_dtype,
                    bmu_max_memory_mb=bmu_max_memory_mb,
                    bmu_config=bmu_config)
@@ -245,9 +271,11 @@ class SOMFactory(object):
         bmus = np.array([bmus_ind, bmus_dist])
         dist_factor = params["dist_factor"]
         load_param=True
-        pace_size = params["pace_size"]
+        pace_size = params.get("pace_size", None)
+        faster = params.get("faster", False)
+        faster_config = params.get("faster_config", None)
         bmu_compute_dtype = params.get("bmu_compute_dtype", "preserve")
-        bmu_max_memory_mb = params.get("bmu_max_memory_mb", 256)
+        bmu_max_memory_mb = params.get("bmu_max_memory_mb", None)
         bmu_config = params.get("bmu_config", None)
 
         return SOM(data = data,
@@ -273,6 +301,8 @@ class SOMFactory(object):
                    dist_factor = dist_factor,
                    pace_size=pace_size,
                    feature_weights=feature_weights,
+                   faster=faster,
+                   faster_config=faster_config,
                    bmu_compute_dtype=bmu_compute_dtype,
                    bmu_max_memory_mb=bmu_max_memory_mb,
                    bmu_config=bmu_config)
@@ -302,25 +332,61 @@ class SOM(object):
                  trained_neurons=None, 
                  bmus = None,
                  dist_factor = 2,
-                 pace_size=100_000,
+                 pace_size=None,
+                 faster=False,
+                 faster_config=None,
                  bmu_compute_dtype='preserve',
-                 bmu_max_memory_mb=256,
+                 bmu_max_memory_mb=None,
                  bmu_config=None):
 
         # Mask for missing values
         self.mask = mask
-        self.pace_size = pace_size
+        self.faster = bool(faster)
+        self._requested_pace_size = pace_size
+        self._requested_bmu_compute_dtype = str(bmu_compute_dtype).lower()
+        self._requested_bmu_max_memory_mb = bmu_max_memory_mb
 
-        # BMU configuration. The public arguments expose the settings that are
-        # most useful in ordinary workflows. Less common tuning options remain
-        # available through bmu_config. Conservative defaults preserve the
-        # input precision and cap the temporary score workspace at 256 MiB.
-        self.bmu_compute_dtype = str(bmu_compute_dtype).lower()
-        if self.bmu_compute_dtype not in {"preserve", "float32", "float64"}:
+        if self._requested_bmu_compute_dtype not in {"preserve", "float32", "float64"}:
             raise ValueError(
                 "bmu_compute_dtype must be 'preserve', 'float32', or 'float64'."
             )
-        self.bmu_max_memory_mb = float(bmu_max_memory_mb)
+
+        # Fast-mode settings are intentionally separated from the ordinary BMU
+        # configuration. Defaults remain conservative unless faster=True.
+        fast_defaults = {
+            "ram_usage_fraction": 0.70,
+            "min_system_reserve_gb": 2.0,
+            "memory_safety_factor": 2.0,
+            "sample_block_cap": 16384,
+            "target_neuron_block": 4096,
+            "blas_threads": "auto",
+            "force_two_axis_blocking": False,
+            "verbose": True,
+        }
+        if faster_config is not None:
+            if not isinstance(faster_config, dict):
+                raise TypeError("faster_config must be a dictionary or None.")
+            unknown = set(faster_config) - set(fast_defaults)
+            if unknown:
+                raise ValueError(
+                    "Unknown faster_config option(s): " + ", ".join(sorted(unknown))
+                )
+            fast_defaults.update(faster_config)
+        if not 0.10 <= float(fast_defaults["ram_usage_fraction"]) <= 0.90:
+            raise ValueError("faster_config['ram_usage_fraction'] must be between 0.10 and 0.90.")
+        if float(fast_defaults["min_system_reserve_gb"]) < 0:
+            raise ValueError("faster_config['min_system_reserve_gb'] must be >= 0.")
+        if int(fast_defaults["sample_block_cap"]) < 1:
+            raise ValueError("faster_config['sample_block_cap'] must be >= 1.")
+        if int(fast_defaults["target_neuron_block"]) < 1:
+            raise ValueError("faster_config['target_neuron_block'] must be >= 1.")
+        self.faster_config = fast_defaults
+
+        # Temporary conservative values. They are finalized after mapsize and
+        # data dimensions are known.
+        self.pace_size = 500 if pace_size is None else int(pace_size)
+        self.bmu_compute_dtype = self._requested_bmu_compute_dtype
+        self.bmu_max_memory_mb = 256.0 if bmu_max_memory_mb is None else float(bmu_max_memory_mb)
         if self.bmu_max_memory_mb <= 0:
             raise ValueError("bmu_max_memory_mb must be greater than zero.")
 
@@ -564,6 +630,8 @@ class SOM(object):
             )
 
 
+        self._configure_faster_mode()
+
         self.QE = 0
         self.QE_expanded = np.zeros(self._dlen)
 
@@ -594,6 +662,129 @@ class SOM(object):
             self.codebook = Codebook(self.mapsize, self.lattice, self.mapshape, self.dist_factor)
             print("Loading distances matrix...")
             self._distance_matrix = self.calculate_map_dist
+
+    @staticmethod
+    def _available_memory_bytes():
+        """Return currently available RAM without requiring psutil."""
+        if psutil is not None:
+            return int(psutil.virtual_memory().available)
+
+        # POSIX fallback.
+        try:
+            page_size = os.sysconf("SC_PAGE_SIZE")
+            available_pages = os.sysconf("SC_AVPHYS_PAGES")
+            return int(page_size * available_pages)
+        except (AttributeError, ValueError, OSError):
+            pass
+
+        # Conservative fallback when memory cannot be inspected.
+        return 4 * 1024**3
+
+    def _configure_faster_mode(self):
+        """Resolve the accelerated exact-BMU profile after mapsize is known."""
+        if not self.faster:
+            # Historical/conservative behavior.
+            if self._requested_pace_size is None:
+                self.pace_size = 500
+            if self._requested_bmu_max_memory_mb is None:
+                self.bmu_max_memory_mb = 256.0
+            return
+
+        if self.missing:
+            warnings.warn(
+                "faster=True was enabled with missing=True. Automatic memory and "
+                "thread settings are applied, but the complete-data two-axis BMU "
+                "kernel cannot be used for samples containing NaN values.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+
+        cfg = self.faster_config
+        available = self._available_memory_bytes()
+        reserve = int(float(cfg["min_system_reserve_gb"]) * 1024**3)
+        usable = max(64 * 1024**2, available - reserve)
+        auto_memory_mb = max(
+            64,
+            int(usable * float(cfg["ram_usage_fraction"]) / 1024**2),
+        )
+
+        if self._requested_bmu_max_memory_mb is None:
+            self.bmu_max_memory_mb = float(auto_memory_mb)
+
+        # Explicit user values always override the fast profile.
+        if self._requested_bmu_compute_dtype == "preserve":
+            self.bmu_compute_dtype = "float32"
+
+        self.bmu_config["memory_safety_factor"] = float(
+            cfg["memory_safety_factor"]
+        )
+        self.bmu_config["force_two_axis_blocking"] = bool(
+            cfg["force_two_axis_blocking"]
+        )
+
+        n_neurons = int(self.mapsize[0] * self.mapsize[1])
+        compute_itemsize = 4 if self.bmu_compute_dtype == "float32" else np.dtype(
+            np.result_type(self._data.dtype, np.float32)
+        ).itemsize
+        usable_tile_bytes = max(
+            1,
+            int(
+                self.bmu_max_memory_mb
+                * 1024**2
+                / float(self.bmu_config["memory_safety_factor"])
+            ),
+        )
+        target_neurons = min(
+            n_neurons,
+            int(cfg["target_neuron_block"]),
+        )
+        auto_pace = max(
+            256,
+            usable_tile_bytes // max(compute_itemsize * target_neurons, 1),
+        )
+        auto_pace = min(
+            int(auto_pace),
+            int(cfg["sample_block_cap"]),
+            int(self._dlen),
+        )
+        if self._requested_pace_size is None:
+            self.pace_size = max(1, auto_pace)
+
+        threads = cfg["blas_threads"]
+        if threads == "auto":
+            threads = max(1, cpu_count())
+        else:
+            threads = max(1, int(threads))
+        self.blas_threads = threads
+
+        # threadpoolctl applies to already-loaded MKL/OpenBLAS libraries.
+        self._threadpool_controller = None
+        if threadpool_limits is not None:
+            self._threadpool_controller = threadpool_limits(limits=threads)
+
+        if bool(cfg["verbose"]):
+            print("Fast mode enabled (exact BMU search)")
+            print(f"  available RAM: {available / 1024**3:,.2f} GiB")
+            print(f"  BMU memory budget: {self.bmu_max_memory_mb:,.0f} MiB")
+            print(f"  BMU dtype: {self.bmu_compute_dtype}")
+            print(f"  sample block: {self.pace_size:,}")
+            print("  neuron block: automatic")
+            print(f"  BLAS threads: {threads}")
+
+    def faster_summary(self):
+        """Return the effective acceleration settings as a dictionary."""
+        return {
+            "faster": self.faster,
+            "pace_size": int(self.pace_size),
+            "bmu_compute_dtype": self.bmu_compute_dtype,
+            "bmu_max_memory_mb": float(self.bmu_max_memory_mb),
+            "bmu_config": dict(self.bmu_config),
+            "faster_config": dict(self.faster_config),
+            "blas_threads": getattr(self, "blas_threads", None),
+            "n_samples": int(self._dlen),
+            "n_features": int(self._dim),
+            "n_neurons": int(self.mapsize[0] * self.mapsize[1]),
+        }
 
     # CLASS PROPERTIES
     
@@ -647,6 +838,8 @@ class SOM(object):
         dic["initialization"] = self.initialization
         dic["training"] = self.training
         dic["pace_size"] = self.pace_size
+        dic["faster"] = self.faster
+        dic["faster_config"] = dict(self.faster_config)
         dic["bmu_compute_dtype"] = self.bmu_compute_dtype
         dic["bmu_max_memory_mb"] = self.bmu_max_memory_mb
         dic["bmu_config"] = dict(self.bmu_config)
