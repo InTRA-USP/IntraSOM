@@ -536,24 +536,15 @@ class SOM(object):
             self.codebook = Codebook(self.mapsize, self.lattice, self.mapshape, self.dist_factor)
             self.codebook.matrix = self._normalizer.normalize_by(self.data_raw, trained_neurons.iloc[:,7:].values)
             
-            try:
-                print("Loading distances matrix...")
-                self._distance_matrix = np.load("Results/distance_matrix.npy")
-                if self.mapsize[0]*self.mapsize[1] != self._distance_matrix.shape[0]:
-                    self._distance_matrix = self.calculate_map_dist
-            except:
-                self._distance_matrix = self.calculate_map_dist
+            print("Loading distances matrix...")
+            self._distance_matrix = self.calculate_map_dist
         else:
             self.data_missing = {"indices":tuple(zip(*np.argwhere(np.isnan(self.data_raw)))), 
                                  "nan_values":None}
             self._bmu = np.zeros((2,self._dlen))
             self.codebook = Codebook(self.mapsize, self.lattice, self.mapshape, self.dist_factor)
-            try:
-                self._distance_matrix = np.load("Results/distance_matrix.npy")
-                if self.mapsize[0]*self.mapsize[1] != self._distance_matrix.shape[0]:
-                    self._distance_matrix = self.calculate_map_dist
-            except:
-                self._distance_matrix = self.calculate_map_dist
+            print("Loading distances matrix...")
+            self._distance_matrix = self.calculate_map_dist
 
     # CLASS PROPERTIES
     
