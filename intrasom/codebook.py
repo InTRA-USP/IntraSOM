@@ -70,60 +70,265 @@ class Codebook(object):
 
     def pca_linear_initialization(self, data):
         """
-        Initialization of the map by using just the first two eigenvalues and
-        eigenvectors. The initialization is done in the following steps:
-        1. Transformation of input data and creation of a template matrix
-        2. Creation of a matrix with scaling factors for each principal component (PC)
-        3. Obtaining and normalization of the eigenvector(s)
-        4. Linear combination for each node of the template matrix with the PC
+        Initializes the SOM codebook using the first principal components
+        of the input data.
 
-        Args:
-            data: data to use for the initialization
+        The SOM map convention is:
 
-        Returns:
-            Initialized matrix with same dimension as input data.
+            mapsize = (columns, rows)
+
+        For a two-dimensional map, neuron coordinates are generated using
+        row-major indexing:
+
+            row = index // columns
+            col = index % columns
+
+        The first spatial coordinate corresponds to the column (x) and the
+        second to the row (y).
+
+        The initialization is performed in the following steps:
+
+            1. Center the input data around its mean.
+            2. Generate normalized spatial coordinates for each SOM neuron.
+            3. Compute the first principal component(s) of the input data.
+            4. Scale the principal directions by their explained variance.
+            5. Distribute the neuron vectors along those directions.
+
+        Parameters
+        ----------
+        data : numpy.ndarray
+            Input data used to initialize the SOM codebook.
+            Rows represent samples and columns represent variables.
+
+        Returns
+        -------
+        None
+            The initialized codebook is stored in ``self.matrix``.
         """
-        cols = self.mapsize[1]
-        coord = None
-        pca_components = None
 
-        me = np.mean(data, 0)
-        data = (data - me)
-        tmp_matrix = np.tile(me, (self.nnodes, 1))
+        # --------------------------------------------------
+        # INPUT DATA
+        # --------------------------------------------------
 
-        if np.min(self.mapsize) > 1:
-            coord = np.zeros((self.nnodes, 2))
+        data = np.asarray(
+            data,
+            dtype=float
+        )
+
+        # --------------------------------------------------
+        # MAP GEOMETRY
+        #
+        # IntraSOM convention:
+        # mapsize = (columns, rows)
+        # --------------------------------------------------
+
+        cols, rows = self.mapsize
+
+        # --------------------------------------------------
+        # CENTER DATA
+        # --------------------------------------------------
+
+        me = np.mean(
+            data,
+            axis=0
+        )
+
+        centered_data = (
+            data - me
+        )
+
+        # Start every neuron at the mean vector.
+        tmp_matrix = np.tile(
+            me,
+            (
+                self.nnodes,
+                1
+            )
+        )
+
+        # --------------------------------------------------
+        # SOM SPATIAL COORDINATES
+        # --------------------------------------------------
+
+        if cols > 1 and rows > 1:
+
+            # Two-dimensional SOM
             pca_components = 2
 
-            for i in range(0, self.nnodes):
-                coord[i, 0] = int(i / cols)  # x
-                coord[i, 1] = int(i % cols)  # y
+            coord = np.zeros(
+                (
+                    self.nnodes,
+                    2
+                ),
+                dtype=float
+            )
 
-        elif np.min(self.mapsize) == 1:
-            coord = np.zeros((self.nnodes, 1))
+            for node_ind in range(
+                self.nnodes
+            ):
+
+                # Row-major indexing:
+                #
+                # 0  1  2  ... cols-1
+                # cols ...
+                #
+                row = node_ind // cols
+                col = node_ind % cols
+
+                # Spatial coordinates:
+                #
+                # axis 0 -> x -> column
+                # axis 1 -> y -> row
+                coord[
+                    node_ind,
+                    0
+                ] = col
+
+                coord[
+                    node_ind,
+                    1
+                ] = row
+
+        else:
+
+            # One-dimensional SOM:
+            #
+            # mapsize may be:
+            #     (N, 1)
+            # or
+            #     (1, N)
+            #
+            # In both cases there is only one spatial dimension.
+
             pca_components = 1
 
-            for i in range(0, self.nnodes):
-                coord[i, 0] = int(i % cols)  # y
+            coord = np.arange(
+                self.nnodes,
+                dtype=float
+            ).reshape(
+                -1,
+                1
+            )
 
-        mx = np.max(coord, axis=0)
-        mn = np.min(coord, axis=0)
-        coord = (coord - mn)/(mx-mn)
-        coord = (coord - .5)*2
+        # --------------------------------------------------
+        # NORMALIZE SPATIAL COORDINATES TO [-1, 1]
+        # --------------------------------------------------
 
-        pca = PCA(n_components=pca_components, svd_solver='randomized')
+        coord_max = np.max(
+            coord,
+            axis=0
+        )
 
-        pca.fit(data)
+        coord_min = np.min(
+            coord,
+            axis=0
+        )
+
+        coord_range = (
+            coord_max - coord_min
+        )
+
+        # Protection against division by zero.
+        #
+        # Normally this only matters for a map containing
+        # a single neuron.
+        coord_range[
+            coord_range == 0
+        ] = 1.0
+
+        coord = (
+            coord - coord_min
+        ) / coord_range
+
+        coord = (
+            coord - 0.5
+        ) * 2.0
+
+        # --------------------------------------------------
+        # PCA
+        # --------------------------------------------------
+
+        pca = PCA(
+            n_components=pca_components,
+            svd_solver="randomized"
+        )
+
+        pca.fit(
+            centered_data
+        )
+
         eigvec = pca.components_
-        eigval = pca.explained_variance_
-        norms = np.sqrt(np.einsum('ij,ij->i', eigvec, eigvec))
-        eigvec = ((eigvec.T/norms)*eigval).T
 
-        for j in range(self.nnodes):
-            for i in range(eigvec.shape[0]):
-                tmp_matrix[j, :] = tmp_matrix[j, :] + coord[j, i]*eigvec[i, :]
+        eigval = (
+            pca.explained_variance_
+        )
 
-        self.matrix = np.around(tmp_matrix, decimals=6)
+        # --------------------------------------------------
+        # NORMALIZE PCA DIRECTIONS
+        # --------------------------------------------------
+
+        norms = np.sqrt(
+            np.einsum(
+                "ij,ij->i",
+                eigvec,
+                eigvec
+            )
+        )
+
+        # Protection against division by zero.
+        norms[
+            norms == 0
+        ] = 1.0
+
+        eigvec = (
+            (
+                eigvec.T / norms
+            )
+            * eigval
+        ).T
+
+        # --------------------------------------------------
+        # INITIALIZE EACH NEURON
+        #
+        # mean
+        #   +
+        # spatial coordinate along PC1
+        #   +
+        # spatial coordinate along PC2
+        # --------------------------------------------------
+
+        for node_ind in range(
+            self.nnodes
+        ):
+
+            for component_ind in range(
+                eigvec.shape[0]
+            ):
+
+                tmp_matrix[
+                    node_ind,
+                    :
+                ] += (
+                    coord[
+                        node_ind,
+                        component_ind
+                    ]
+                    *
+                    eigvec[
+                        component_ind,
+                        :
+                    ]
+                )
+
+        # --------------------------------------------------
+        # SAVE INITIALIZED CODEBOOK
+        # --------------------------------------------------
+
+        self.matrix = np.around(
+            tmp_matrix,
+            decimals=6
+        )
+
         self.initialized = True
     
     def pretrain(self):
