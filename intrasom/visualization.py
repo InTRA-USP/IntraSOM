@@ -1,1379 +1,2532 @@
-import numpy as np
-from sklearn.preprocessing import minmax_scale
-from numpy import nan, dot, nanmean
-from math import sqrt
-import matplotlib.pyplot as plt
-from matplotlib.patches import RegularPolygon
-from matplotlib import cm
-import matplotlib.gridspec as gridspec
-import matplotlib as mpl
-from tqdm.auto import tqdm
-from scipy import sparse as sp
-from PIL import Image
-import glob
 import os
+import glob
+from io import BytesIO
+from math import pi
 from textwrap import fill
-from numpy import pi, sin, cos
-from sklearn.cluster import KMeans
-from sklearn.utils import shuffle
 from importlib import resources
+
+import numpy as np
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+from matplotlib.collections import PolyCollection
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+from PIL import Image
+from tqdm.auto import tqdm
+
 import plotly.graph_objs as go
 from scipy.ndimage import rotate
 from skimage.transform import resize
-from sklearn.metrics.pairwise import nan_euclidean_distances
-import statistics
+from sklearn.cluster import MiniBatchKMeans
 
 
+class PlotFactory:
+    """
+    Visualization utilities for IntraSOM.
 
-class PlotFactory(object):
+    Public SOM map convention
+    -------------------------
+    mapsize = (columns, rows)
+
+    NumPy matrices are always stored as
+    -------------------------------
+    shape = (rows, columns)
+
+    Linear neuron indexing is row-major
+    ----------------------------------
+    row = node_index // columns
+    col = node_index % columns
+
+    Both hexagonal (``hexa``) and rectangular (``rect``) lattices are
+    supported. Plot geometry is generated from the lattice type rather
+    than assuming a hexagonal map.
+    """
+
+    _VALID_LATTICES = {"hexa", "rect"}
+    _VALID_MAPSHAPES = {"planar", "toroid"}
 
     def __init__(self, som_object):
         self.name = som_object.name
         self.codebook = som_object.codebook.matrix
-        self.mapsize = som_object.mapsize
-        self.bmus = som_object._bmu[0].astype(int)
-        self.neuron_matrix = som_object.neuron_matrix
-        self.component_names = som_object._component_names
-        self.sample_names = som_object._sample_names
-        self.unit_names = som_object._unit_names
+
+        # Public convention: mapsize = (columns, rows)
+        self.mapsize = tuple(int(v) for v in som_object.mapsize)
+        if len(self.mapsize) != 2:
+            raise ValueError(
+                "mapsize must contain exactly two values: (columns, rows)."
+            )
+
+        self.cols, self.rows = self.mapsize
+
+        if self.cols <= 0 or self.rows <= 0:
+            raise ValueError("mapsize values must be greater than zero.")
+
+        self.lattice = getattr(som_object, "lattice", "hexa")
+        self.mapshape = getattr(som_object, "mapshape", "planar")
+
+        if self.lattice not in self._VALID_LATTICES:
+            raise ValueError(
+                f"Unsupported lattice {self.lattice!r}. "
+                "Accepted values are 'hexa' and 'rect'."
+            )
+
+        if self.mapshape not in self._VALID_MAPSHAPES:
+            raise ValueError(
+                f"Unsupported mapshape {self.mapshape!r}. "
+                "Accepted values are 'planar' and 'toroid'."
+            )
+
+        self.bmus = np.asarray(som_object._bmu[0], dtype=int)
+        self.neuron_matrix = np.asarray(som_object.neuron_matrix)
+        self.component_names = np.asarray(som_object._component_names)
+        self.sample_names = np.asarray(som_object._sample_names)
+        self.unit_names = np.asarray(som_object._unit_names)
         self.rep_sample = som_object.rep_sample
-        self.data_denorm = som_object.denorm_data(som_object._data)
+        self.data_denorm = np.asarray(
+            som_object.denorm_data(som_object._data)
+        )
         self.data_proj_norm = som_object.data_proj_norm
-        ## added
+
+        # Use the SOM implementation as the single source of truth for
+        # U-Matrix distances.
         self.build_umatrix = som_object.build_umatrix
-        
-        # Load foot image
-        image_file = resources.files("intrasom") / "images" / "foot.jpg"
-        self.foot = Image.open(image_file)
 
-    # def build_umatrix(self, expanded=False, log=False):
-    #     """
-    #     Function to calculate the U-Matrix of unified distances from the trained weight matrix.
-    # 
-    #     Args:
-    #         exapanded: Boolean value to indicate whether the return will be the summarized 
-    #             U-Matrix (average distances of the 6 neighboring BMUs) or the expanded 
-    #             U-Matrix (all distance values).
-    #         
-    #         log: Returns the base 10 logarithm for the distance values. It is used when 
-    #             there are samples with a large dissimilarity boundary that masks the 
-    #             visualization of the U-Matrix. The logarithmic transformation of these 
-    #             values allows for a better visualization of the matrix.
-    # 
-    #     Returns:
-    #         Expanded or summarized U-Matrix of distances.
-    #     """
-    #     # Function to find distance quickly
-    #     def fast_norm(x):
-    #         """
-    #         Returns the L2 norm of a 1-D array.
-    #         """
-    #         return sqrt(dot(x, x.T))
-    # 
-    #     print('Using visualization.py definition')
-    #     # Neurons weights matrix
-    #     weights = np.reshape(self.codebook, (self.mapsize[1], self.mapsize[0], self.codebook.shape[1]))
-    # 
-    #     # Neighbor hexagonal search
-    #     ii = [[1, 1, 0, -1, 0, 1], [1, 0,-1, -1, -1, 0]]
-    #     jj = [[0, 1, 1, 0, -1, -1], [0, 1, 1, 0, -1, -1]]
-    # 
-    #     # Initialize U Matrix
-    #     um = np.nan * np.zeros((weights.shape[0], weights.shape[1], 6))
-    # 
-    #     # Fill U-matrix
-    #     for y in range(weights.shape[0]):
-    #         for x in range(weights.shape[1]):
-    #             w_2 = weights[y, x]
-    #             e = y % 2 == 0
-    #             for k, (i, j) in enumerate(zip(ii[e], jj[e])):
-    #                 if (x+i >= 0 and x+i < weights.shape[1] and y+j >= 0 and y+j < weights.shape[0]):
-    #                     w_1 = weights[y+j, x+i]
-    #                     um[y, x, k] = fast_norm(w_2-w_1)
-    #     if expanded:
-    #         # Expanded U Matrix
-    #         return np.log(um) if log else um
-    #     else:
-    #         # Reduced U Matrix
-    #         return nanmean(np.log(um), axis=2) if log else nanmean(um, axis=2)
-                        
-    def plot_umatrix(self,
-                     figsize = (10,10),
-                     hits = True,
-                     title = "U-Matrix",
-                     title_size = 40,
-                     title_pad = 25,
-                     legend_title = "Distance",
-                     legend_title_size = 25,
-                     legend_ticks_size = 20,
-                     save = True,
-                     watermark_neurons = False,
-                     watermark_neurons_alfa = 0.5,
-                     neurons_fontsize = 7,
-                     file_name = None,
-                     file_path = False, 
-                     resume = False,
-                     label_plot = False, 
-                     label_plot_name = None,
-                     project_samples_label = None,
-                     samples_label = False,
-                     samples_label_index = None,
-                     samples_label_fontsize = 8,
-                     save_labels_rep = False,
-                     label_title_xy = (0,0.5),
-                     log=False):
+        if self.codebook.shape[0] != self.cols * self.rows:
+            raise ValueError(
+                "The codebook number of neurons is inconsistent with mapsize. "
+                f"codebook={self.codebook.shape[0]}, "
+                f"mapsize={self.mapsize} -> {self.cols * self.rows} neurons."
+            )
+
+        # Geometry cache avoids rebuilding coordinates for every plot.
+        self._geometry_cache = {}
+
+        # Load watermark once. Failure to locate the image must not prevent
+        # plotting from working.
+        self.foot = None
+        try:
+            image_file = resources.files("intrasom") / "images" / "foot.jpg"
+            with Image.open(image_file) as img:
+                self.foot = img.copy()
+        except Exception:
+            self.foot = None
+
+    # ------------------------------------------------------------------
+    # GEOMETRY HELPERS
+    # ------------------------------------------------------------------
+
+    def _node_coordinates(self):
         """
-        Function to plot the U-Matrix of unified distances.
+        Return node coordinates as two arrays with shape (rows, columns).
 
-        Args:
-            figsize:  Size of the U-Matrix plotting area. The adjustment of these values is 
-                crucial for the proper distribution of the plotted objects and strongly depends 
-                on the shape of the trained map (number of rows and columns). Default: (10, 10)
-
-            hits: Boolean value to indicate whether to plot the hits of input vectors on the 
-                BMUs (proportional to the number of vectors per BMU). These hits are visualized as 
-                white hexagons with size proportional to the number of input samples represented 
-                by that BMU.
-
-            title: Title of the created figure. Default: "U-Matrix"
-
-            title_size: Size of the plotted title. Default: 40
-
-            title_pad: Spacing between the title and the top of the matrix. Default: 25
-
-            legend_title: Title of the legend color bar. Default: "Distance"
-
-            legend_title_size: Size of the legend title. Default: 25
-
-            legend_ticks_size: Size of the digits on the legend color bar. Default: 20
-
-            save: Boolean value to define whether to save the created image. The image will be saved in the 
-                directory (Plotagens/Matriz_U). Default: True
-
-            watermark_neurons: Boolean value to add a watermark with the neuron numbers to the image. 
-                Default: False
-
-            watermark_neurons_alfa: Value between 0 and 1 indicating the transparency of the plotted 
-                neuron template over the U-Matrix. The closer to 1, the lower the transparency. Default: 0.5.
-
-            neurons_fontsize: Font size for the neuron numbers to be plotted. Default: 7.
-
-            file_name: Name to be given to the saved file. If no name is provided, the project name 
-                will be used.
-
-            file_path: System path where the image should be saved, if a custom path is preferred.
-
-            resume: Boolean value to plot only the upper part of the U-Matrix, omitting the mirrored 
-                lower part. Default: False
-
-            label_plot: Boolean value to add labels to the hexagons of the U-Matrix according to a 
-                boolean variable present in the training. Default: False
-
-            label_plot_names: Name of the variable for plotting. The presence of the variable is 
-                indicated by white hits, and the absence by black hits. Default: None
-
-            samples_label: Boolean value to indicate the plotting of labels for selected samples. 
-                Default: False.
-
-            samples_label_index: List of indices of the selected samples for label plotting. 
-                Default: None. "All" for plotting all samples.
-
-            samples_label_fontsize: Font size for the plotted labels. Default: 8.
-
-            save_labels_rep: Boolean value to indicate whether to save a .txt file in Results with 
-                the selected samples and their representativeness order in each BMU. Default: False.
-
-            label_title_xy: Coordinates (x, y) to position the label title. Default: (-0.02, 1.1)
-
-            log: Boolean value to plot the U-Matrix on a logarithmic scale for better visualization 
-                of dissimilarity boundaries in the presence of outliers.
-
-        Returns:
-            The image with the plot of the U-Matrix of unified distances.
+        The map API uses (columns, rows), while NumPy indexing always uses
+        [row, column].
         """
-        def select_keys(original_dict, keys_list):
-            new_dict = {}
-            keys_list = np.array(keys_list)
-            if keys_list.shape[0]>1:
-                for key in keys_list:
-                    if key in original_dict:
-                        new_dict[key] = original_dict[key]
-            else:
-                if keys_list[0] in original_dict:
-                    new_dict[keys_list[0]] = original_dict[keys_list[0]]
-            return new_dict
-        
-        def search_strings(search_list, target_list):
-            found_index = None
-            found_string = None
+        cache_key = ("node_coordinates", self.lattice, self.cols, self.rows)
 
-            for search_string in search_list:
-                for index, target_string in enumerate(target_list):
-                    if search_string == target_string:
-                        if found_index is None or index < found_index:
-                            found_index = index
-                            found_string = search_string
-                        break
+        if cache_key in self._geometry_cache:
+            return self._geometry_cache[cache_key]
 
-            return found_string, found_index
+        if self.lattice == "hexa":
+            coordinates = self.generate_hex_lattice(
+                self.cols,
+                self.rows
+            )
+        else:
+            coordinates = self.generate_rec_lattice(
+                self.cols,
+                self.rows
+            )
 
+        xx = coordinates[:, 0].reshape(
+            self.rows,
+            self.cols
+        )
+        yy = coordinates[:, 1].reshape(
+            self.rows,
+            self.cols
+        )
+
+        self._geometry_cache[cache_key] = (xx, yy)
+        return xx, yy
+
+    @staticmethod
+    def _safe_norm(values):
+        """
+        Build a Matplotlib Normalize that remains valid for constant data.
+        """
+        values = np.asarray(values, dtype=float)
+        finite = values[np.isfinite(values)]
+
+        if finite.size == 0:
+            return mpl.colors.Normalize(vmin=0.0, vmax=1.0)
+
+        vmin = float(np.min(finite))
+        vmax = float(np.max(finite))
+
+        if np.isclose(vmin, vmax):
+            pad = 0.5 if np.isclose(vmin, 0.0) else abs(vmin) * 0.01
+            if np.isclose(pad, 0.0):
+                pad = 0.5
+            vmin -= pad
+            vmax += pad
+
+        return mpl.colors.Normalize(vmin=vmin, vmax=vmax)
+
+    @staticmethod
+    def _polygon_vertices(
+        centers,
+        lattice,
+        sizes=1.0,
+    ):
+        """
+        Vectorized polygon generation.
+
+        Parameters
+        ----------
+        centers : array-like, shape (n, 2)
+            Cell centers.
+        lattice : {"hexa", "rect"}
+            Shape to generate.
+        sizes : float or array-like
+            Relative cell scale. A value of 1 reproduces the base SOM cell.
+        """
+        centers = np.asarray(centers, dtype=float).reshape(-1, 2)
+        n = centers.shape[0]
+
+        sizes = np.asarray(sizes, dtype=float)
+        if sizes.ndim == 0:
+            sizes = np.full(n, float(sizes), dtype=float)
+        else:
+            sizes = np.broadcast_to(sizes.reshape(-1), (n,)).astype(float)
+
+        if lattice == "hexa":
+            # Preserve the historical RegularPolygon orientation used by
+            # visualization.py while generating all polygons vectorially.
+            angles = np.arange(6, dtype=float) * (2.0 * np.pi / 6.0)
+            radius = (1.0 / np.sqrt(3.0)) * sizes
+            offsets = np.stack(
+                [np.cos(angles), np.sin(angles)],
+                axis=1
+            )
+            vertices = (
+                centers[:, None, :]
+                + radius[:, None, None] * offsets[None, :, :]
+            )
+            return vertices
+
+        # Rectangular lattice: one square per neuron at unit spacing.
+        half = 0.5 * sizes
+        base = np.array(
+            [
+                [-1.0, -1.0],
+                [1.0, -1.0],
+                [1.0, 1.0],
+                [-1.0, 1.0],
+            ],
+            dtype=float,
+        )
+        vertices = (
+            centers[:, None, :]
+            + half[:, None, None] * base[None, :, :]
+        )
+        return vertices
+
+    def _add_value_cells(
+        self,
+        ax,
+        centers,
+        values,
+        *,
+        cmap,
+        norm,
+        lattice=None,
+        sizes=1.0,
+        edgecolors="none",
+        linewidths=0.0,
+        alpha=1.0,
+        zorder=1,
+    ):
+        """
+        Add many colored SOM cells in one PolyCollection.
+
+        This is substantially faster than adding one Matplotlib patch at a
+        time, especially for large maps.
+        """
+        lattice = self.lattice if lattice is None else lattice
+
+        centers = np.asarray(centers, dtype=float).reshape(-1, 2)
+        values = np.asarray(values, dtype=float).reshape(-1)
+
+        if centers.shape[0] != values.size:
+            raise ValueError(
+                "centers and values must contain the same number of cells."
+            )
+
+        valid = np.isfinite(values)
+
+        if not np.any(valid):
+            return None
+
+        centers = centers[valid]
+        values = values[valid]
+
+        if np.ndim(sizes) == 0:
+            filtered_sizes = sizes
+        else:
+            filtered_sizes = np.asarray(sizes).reshape(-1)[valid]
+
+        vertices = self._polygon_vertices(
+            centers,
+            lattice,
+            filtered_sizes,
+        )
+
+        collection = PolyCollection(
+            vertices,
+            cmap=cmap,
+            norm=norm,
+            edgecolors=edgecolors,
+            linewidths=linewidths,
+            alpha=alpha,
+            zorder=zorder,
+        )
+        collection.set_array(values)
+
+        ax.add_collection(collection)
+        return collection
+
+    def _add_solid_cells(
+        self,
+        ax,
+        centers,
+        *,
+        facecolors,
+        edgecolors=None,
+        linewidths=0.0,
+        alpha=1.0,
+        sizes=1.0,
+        lattice=None,
+        zorder=3,
+    ):
+        """
+        Add many solid-color SOM cells in one PolyCollection.
+        """
+        lattice = self.lattice if lattice is None else lattice
+        centers = np.asarray(centers, dtype=float).reshape(-1, 2)
+
+        if centers.size == 0:
+            return None
+
+        vertices = self._polygon_vertices(
+            centers,
+            lattice,
+            sizes,
+        )
+
+        if edgecolors is None:
+            edgecolors = facecolors
+
+        collection = PolyCollection(
+            vertices,
+            facecolors=facecolors,
+            edgecolors=edgecolors,
+            linewidths=linewidths,
+            alpha=alpha,
+            zorder=zorder,
+        )
+        ax.add_collection(collection)
+        return collection
+
+    def _set_map_limits(
+        self,
+        ax,
+        centers,
+        *,
+        pad=0.75,
+        invert_y=True,
+    ):
+        """
+        Set axis limits from actual geometry instead of hard-coded formulas.
+
+        This prevents row/column mistakes on non-square maps.
+        """
+        centers = np.asarray(centers, dtype=float).reshape(-1, 2)
+
+        if centers.size == 0:
+            return
+
+        xmin = float(np.nanmin(centers[:, 0])) - pad
+        xmax = float(np.nanmax(centers[:, 0])) + pad
+        ymin = float(np.nanmin(centers[:, 1])) - pad
+        ymax = float(np.nanmax(centers[:, 1])) + pad
+
+        ax.set_xlim(xmin, xmax)
+
+        if invert_y:
+            ax.set_ylim(ymax, ymin)
+        else:
+            ax.set_ylim(ymin, ymax)
+
+        ax.set_aspect("equal", adjustable="box")
+        ax.set_axis_off()
+
+    def _umatrix_geometry(self, um, umat):
+        """
+        Convert reduced and expanded U-Matrix arrays into drawable cells.
+
+        ``build_umatrix`` is expected to return:
+            hexa -> expanded shape (rows, cols, 6)
+            rect -> expanded shape (rows, cols, 4)
+
+        Only one copy of each undirected edge is drawn:
+            hexa -> neighbor slots 0, 1, 2
+            rect -> neighbor slots 0, 1
+        """
+        um = np.asarray(um, dtype=float)
+        umat = np.asarray(umat, dtype=float)
+
+        expected_umat = (self.rows, self.cols)
+
+        if umat.shape != expected_umat:
+            raise ValueError(
+                "Reduced U-Matrix has an invalid shape. "
+                f"Received {umat.shape}, expected {expected_umat}."
+            )
+
+        expected_neighbors = 6 if self.lattice == "hexa" else 4
+        expected_um = (
+            self.rows,
+            self.cols,
+            expected_neighbors,
+        )
+
+        if um.shape != expected_um:
+            raise ValueError(
+                "Expanded U-Matrix has an invalid shape. "
+                f"Received {um.shape}, expected {expected_um}. "
+                "Check that build_umatrix supports the selected lattice."
+            )
+
+        xx, yy = self._node_coordinates()
+
+        node_centers = np.column_stack(
+            [
+                (2.0 * xx).ravel(),
+                (2.0 * yy).ravel(),
+            ]
+        )
+        node_values = umat.ravel()
+
+        if self.lattice == "hexa":
+            # Same three unique directions historically drawn by the
+            # hexagonal U-Matrix implementation.
+            offsets = np.array(
+                [
+                    [1.0, 0.0],
+                    [0.5, np.sqrt(3.0) / 2.0],
+                    [-0.5, np.sqrt(3.0) / 2.0],
+                ],
+                dtype=float,
+            )
+            neighbor_slots = (0, 1, 2)
+        else:
+            # build_umatrix rectangular order:
+            # 0=right, 1=bottom, 2=left, 3=top.
+            # Drawing right and bottom once represents every undirected edge.
+            offsets = np.array(
+                [
+                    [1.0, 0.0],
+                    [0.0, 1.0],
+                ],
+                dtype=float,
+            )
+            neighbor_slots = (0, 1)
+
+        edge_centers = []
+        edge_values = []
+
+        for offset, slot in zip(offsets, neighbor_slots):
+            values = um[:, :, slot].ravel()
+            edge_centers.append(
+                node_centers + offset
+            )
+            edge_values.append(values)
+
+        edge_centers = np.vstack(edge_centers)
+        edge_values = np.concatenate(edge_values)
+
+        return (
+            node_centers,
+            node_values,
+            edge_centers,
+            edge_values,
+        )
+
+    def _render_figure_to_array(self, fig):
+        """
+        Render a Matplotlib figure directly to an RGB ndarray.
+
+        Avoids the previous save-to-disk/read-from-disk roundtrip.
+        """
+        canvas = FigureCanvasAgg(fig)
+        canvas.draw()
+
+        rgba = np.asarray(canvas.buffer_rgba())
+        return np.ascontiguousarray(rgba[:, :, :3])
+
+    def _plot_umatrix_texture(
+        self,
+        *,
+        um,
+        umat,
+        hits=True,
+        cmap,
+        norm,
+        figsize=(10, 10),
+    ):
+        """
+        Render a seamless periodic U-Matrix texture for ``plot_torus``.
+
+        The geometry is tiled in a 3x3 neighborhood and cropped to one exact
+        map period. This is robust for non-square maps and for both lattices.
+        """
+        (
+            node_centers,
+            node_values,
+            edge_centers,
+            edge_values,
+        ) = self._umatrix_geometry(um, umat)
+
+        if self.lattice == "hexa":
+            period_x = 2.0 * self.cols
+            period_y = np.sqrt(3.0) * self.rows
+            crop_x0 = -1.0
+            crop_y0 = -np.sqrt(3.0) / 2.0
+        else:
+            period_x = 2.0 * self.cols
+            period_y = 2.0 * self.rows
+            crop_x0 = -1.0
+            crop_y0 = -1.0
+
+        translations = np.array(
+            [
+                [dx * period_x, dy * period_y]
+                for dy in (-1, 0, 1)
+                for dx in (-1, 0, 1)
+            ],
+            dtype=float,
+        )
+
+        tiled_nodes = np.vstack(
+            [node_centers + shift for shift in translations]
+        )
+        tiled_node_values = np.tile(
+            node_values,
+            len(translations)
+        )
+
+        tiled_edges = np.vstack(
+            [edge_centers + shift for shift in translations]
+        )
+        tiled_edge_values = np.tile(
+            edge_values,
+            len(translations)
+        )
+
+        fig, ax = plt.subplots(
+            figsize=figsize,
+            dpi=180,
+        )
+        ax.set_aspect("equal")
+
+        self._add_value_cells(
+            ax,
+            tiled_nodes,
+            tiled_node_values,
+            cmap=cmap,
+            norm=norm,
+        )
+        self._add_value_cells(
+            ax,
+            tiled_edges,
+            tiled_edge_values,
+            cmap=cmap,
+            norm=norm,
+        )
+
+        if hits:
+            hit_sizes = self.hits_dictionary
+            hit_nodes = np.array(
+                sorted(hit_sizes.keys()),
+                dtype=int,
+            )
+
+            if hit_nodes.size:
+                valid = (
+                    (hit_nodes >= 0)
+                    & (hit_nodes < node_centers.shape[0])
+                )
+                hit_nodes = hit_nodes[valid]
+
+                hit_centers = node_centers[hit_nodes]
+                hit_scales = np.array(
+                    [hit_sizes[int(i)] for i in hit_nodes],
+                    dtype=float,
+                )
+
+                tiled_hit_centers = np.vstack(
+                    [hit_centers + shift for shift in translations]
+                )
+                tiled_hit_scales = np.tile(
+                    hit_scales,
+                    len(translations)
+                )
+
+                self._add_solid_cells(
+                    ax,
+                    tiled_hit_centers,
+                    facecolors="white",
+                    edgecolors="lightgray",
+                    linewidths=0.4,
+                    sizes=tiled_hit_scales,
+                    zorder=4,
+                )
+
+        ax.set_xlim(
+            crop_x0,
+            crop_x0 + period_x,
+        )
+        ax.set_ylim(
+            crop_y0 + period_y,
+            crop_y0,
+        )
+        ax.set_axis_off()
+        fig.subplots_adjust(
+            left=0,
+            right=1,
+            bottom=0,
+            top=1,
+        )
+
+        image = self._render_figure_to_array(fig)
+        plt.close(fig)
+
+        return image
+
+    # ------------------------------------------------------------------
+    # U-MATRIX
+    # ------------------------------------------------------------------
+
+    def plot_umatrix(
+        self,
+        figsize=(10, 10),
+        hits=True,
+        title="U-Matrix",
+        title_size=40,
+        title_pad=25,
+        legend_title="Distance",
+        legend_title_size=25,
+        legend_ticks_size=20,
+        save=True,
+        watermark_neurons=False,
+        watermark_neurons_alfa=0.5,
+        neurons_fontsize=7,
+        file_name=None,
+        file_path=False,
+        resume=False,
+        label_plot=False,
+        label_plot_name=None,
+        project_samples_label=None,
+        samples_label=False,
+        samples_label_index=None,
+        samples_label_fontsize=8,
+        save_labels_rep=False,
+        label_title_xy=(0, 0.5),
+        log=False,
+        cmap="jet",
+    ):
+        """
+        Plot the SOM U-Matrix for hexagonal or rectangular lattices.
+
+        ``mapsize`` is interpreted strictly as ``(columns, rows)``.
+        Internally, all matrices are reshaped as ``(rows, columns)``.
+
+        For rectangular lattices, neuron cells and inter-neuron distance
+        cells are drawn as squares, preserving the same visual logic used
+        by the hexagonal U-Matrix.
+
+        ``resume=True`` returns a seamless RGB texture used by
+        :meth:`plot_torus`.
+        """
         if file_name is None:
             file_name = f"U_Matrix_{self.name}"
 
-        if hits:
-            bmu_dic = self.hits_dictionary
+        um = np.asarray(
+            self.build_umatrix(
+                expanded=True,
+                log=log,
+            ),
+            dtype=float,
+        )
+        umat = np.asarray(
+            self.build_umatrix(
+                expanded=False,
+                log=log,
+            ),
+            dtype=float,
+        )
 
-        # Create coordinates
-        xx = np.reshape(self.generate_hex_lattice(self.mapsize[0], self.mapsize[1])[:,0], (self.mapsize[1], self.mapsize[0]))
-        yy = np.reshape(self.generate_hex_lattice(self.mapsize[0], self.mapsize[1])[:,1], (self.mapsize[1], self.mapsize[0]))
+        all_values = np.concatenate(
+            [
+                um[np.isfinite(um)],
+                umat[np.isfinite(umat)],
+            ]
+        )
+        norm = self._safe_norm(all_values)
+        cmap_obj = mpl.colormaps[cmap]
 
-        # U Matrix
-        um = self.build_umatrix(expanded = True, log=log)
-        umat = self.build_umatrix(expanded = False, log=log)
-        
-        
         if resume:
-            # Plotting
-            prop = self.mapsize[1]*0.8660254/self.mapsize[0]
-            f = plt.figure(figsize=(5, 5*prop), dpi=300)
-            f.patch.set_facecolor('blue')
-            ax = f.add_subplot()
-            ax.set_aspect('equal')
+            image = self._plot_umatrix_texture(
+                um=um,
+                umat=umat,
+                hits=hits,
+                cmap=cmap_obj,
+                norm=norm,
+                figsize=figsize,
+            )
 
-            # Normalize colors for all hexagons
-            norm = mpl.colors.Normalize(vmin=np.nanmin(um), vmax=np.nanmax(um))
-            counter = 0
-
-            for j in range(self.mapsize[1]):
-                for i in range(self.mapsize[0]):
-                    # Central Hexagon
-                    hex = RegularPolygon((xx[(j, i)]*2,
-                                          yy[(j,i)]*2),
-                                         numVertices=6,
-                                         radius=1/np.sqrt(3),
-                                         facecolor= cm.jet(norm(umat[j][i])),
-                                         alpha=1)#, edgecolor='black')
-
-                    ax.add_patch(hex)
-
-                    # Upper Right Hexagon
-                    if not np.isnan(um[j, i, 0]):
-                        hex = RegularPolygon((xx[(j, i)]*2+1,
-                                              yy[(j,i)]*2),
-                                             numVertices=6,
-                                             radius=1/np.sqrt(3),
-                                             facecolor=cm.jet(norm(um[j,i,0])),
-                                             alpha=1)
-                        ax.add_patch(hex)
-
-                    # Upper Left Hexagon
-                    if not np.isnan(um[j, i, 1]):
-                        hex = RegularPolygon((xx[(j, i)]*2+0.5,
-                                              yy[(j,i)]*2+(np.sqrt(3)/2)),
-                                             numVertices=6,
-                                             radius=1/np.sqrt(3),
-                                             facecolor=cm.jet(norm(um[j,i,1])),
-                                             alpha=1)
-                        ax.add_patch(hex)
-
-                    # Hexagono Superior Esquerdo
-                    if not np.isnan(um[j, i, 2]):
-                        hex = RegularPolygon((xx[(j, i)]*2-0.5,
-                                              yy[(j,i)]*2+(np.sqrt(3)/2)),
-                                             numVertices=6,
-                                             radius=1/np.sqrt(3),
-                                             facecolor=cm.jet(norm(um[j,i,2])),
-                                             alpha=1)
-                        ax.add_patch(hex)
-                        
-
-                    
-                    if j==0:
-                        # Central Hexagon
-                        hex = RegularPolygon((xx[(j, i)]*2,
-                                              yy[(j,i)]*2+(0.8660254*self.mapsize[1]*2)),
-                                             numVertices=6,
-                                             radius=1/np.sqrt(3),
-                                             facecolor= cm.jet(norm(umat[j][i])),
-                                             alpha=1)#, edgecolor='black')
-                        ax.add_patch(hex)
-                        
-                        # Right
-                        if not np.isnan(um[j, i, 0]):
-                            hex = RegularPolygon((xx[(j, i)]*2+1,
-                                                  yy[(j,i)]*2+(0.8660254*self.mapsize[1]*2)),
-                                                 numVertices=6,
-                                                 radius=1/np.sqrt(3),
-                                                 facecolor=cm.jet(norm(um[j,i,0])),
-                                                 alpha=1)
-                            ax.add_patch(hex)
-                            
-                        # Lower Right Hexagon
-                        if not np.isnan(um[j, i, 1]):
-                            hex = RegularPolygon((xx[(j, i)]*2+0.5,
-                                                  yy[(j,i)]*2-(np.sqrt(3)/2)+(0.8660254*self.mapsize[1]*2)),
-                                                 numVertices=6,
-                                                 radius=1/np.sqrt(3),
-                                                 facecolor=cm.jet(norm(um[j,i,1])),
-                                                 alpha=1)
-                            ax.add_patch(hex)
-                            
-                        # Bottom Left Hexagon
-                        if not np.isnan(um[j, i, 2]):
-                            hex = RegularPolygon((xx[(j, i)]*2-0.5,
-                                                  yy[(j,i)]*2-(np.sqrt(3)/2)+(0.8660254*self.mapsize[1]*2)),
-                                                 numVertices=6,
-                                                 radius=1/np.sqrt(3),
-                                                 facecolor=cm.jet(norm(um[j,i,2])),
-                                                 alpha=1)
-                            ax.add_patch(hex)
-                    if i==0:
-                        # Central Hexagon
-                        hex = RegularPolygon((xx[(j, i)]*2 + self.mapsize[0]*2 - 1,
-                                              yy[(j,i)]*2),
-                                             numVertices=6,
-                                             radius=1/np.sqrt(3),
-                                             facecolor= cm.jet(norm(umat[j][i])),
-                                             alpha=1)#, edgecolor='red')
-                        ax.add_patch(hex)
-                        
-                        # Right
-                        if not np.isnan(um[j, i, 0]):
-                            hex = RegularPolygon((xx[(j, i)]*2 + self.mapsize[0]*2,
-                                                  yy[(j,i)]*2),
-                                                 numVertices=6,
-                                                 radius=1/np.sqrt(3),
-                                                 facecolor=cm.jet(norm(um[j,i,0])),
-                                                 alpha=1)
-                            ax.add_patch(hex)
-                                                 
-                        # Upper Right Hexagon
-                        if not np.isnan(um[j, i, 1]):
-                            hex = RegularPolygon((xx[(j, i)]*2 + self.mapsize[0]*2 - 0.5,
-                                                  yy[(j,i)]*2+(np.sqrt(3)/2)),
-                                                 numVertices=6,
-                                                 radius=1/np.sqrt(3),
-                                                 facecolor=cm.jet(norm(um[j,i,1])),
-                                                 alpha=1)
-                            ax.add_patch(hex)
-                            
-                        # Bottom Left Hexagon
-                        if not np.isnan(um[j, i, 2]):
-                            hex = RegularPolygon((xx[(j, i)]*2 + self.mapsize[0]*2 - 1.5,
-                                                  yy[(j,i)]*2+(np.sqrt(3)/2)),
-                                                 numVertices=6,
-                                                 radius=1/np.sqrt(3),
-                                                 facecolor=cm.jet(norm(um[j,i,2])),
-                                                 alpha=1)
-                            ax.add_patch(hex)
-                            
-                    if i==0 and j==0:
-                        # Central Hexagon
-                        hex = RegularPolygon((xx[(j, i)]*2 + self.mapsize[0]*2-1,
-                                              yy[(j,i)]*2+(0.8660254*self.mapsize[1]*2)),
-                                             numVertices=6,
-                                             radius=1/np.sqrt(3),
-                                             facecolor= cm.jet(norm(umat[j][i])),
-                                             alpha=1)#, edgecolor='black')
-                        ax.add_patch(hex)
-                        
-                        # Right
-                        if not np.isnan(um[j, i, 0]):
-                            hex = RegularPolygon((xx[(j, i)]*2 + self.mapsize[0]*2,
-                                                  yy[(j,i)]*2+(0.8660254*self.mapsize[1]*2)),
-                                                 numVertices=6,
-                                                 radius=1/np.sqrt(3),
-                                                 facecolor=cm.jet(norm(um[j,i,0])),
-                                                 alpha=1)
-                            ax.add_patch(hex)
-                                                 
-                       # Lower Right Hexagon
-                        if not np.isnan(um[j, i, 1]):
-                            hex = RegularPolygon((xx[(j, i)]*2+ self.mapsize[0]*2-0.5,
-                                                  yy[(j,i)]*2-(np.sqrt(3)/2)+(0.8660254*self.mapsize[1]*2)),
-                                                 numVertices=6,
-                                                 radius=1/np.sqrt(3),
-                                                 facecolor=cm.jet(norm(um[j,i,1])),
-                                                 alpha=1)
-                            ax.add_patch(hex)
-                            
-                        # Bottom Left Hexagon
-                        if not np.isnan(um[j, i, 2]):
-                            hex = RegularPolygon((xx[(j, i)]*2+ self.mapsize[0]*2-1.5,
-                                                  yy[(j,i)]*2-(np.sqrt(3)/2)+(0.8660254*self.mapsize[1]*2)),
-                                                 numVertices=6,
-                                                 radius=1/np.sqrt(3),
-                                                 facecolor=cm.jet(norm(um[j,i,2])),
-                                                 alpha=1)
-                            ax.add_patch(hex)
-
-                    # Plot hits
-                    if hits:
-                        try:
-                            hex = RegularPolygon((xx[(j,i)]*2,
-                                                  yy[(j,i)]*2),
-                                                 numVertices=6,
-                                                 radius=1/np.sqrt(3)*bmu_dic[counter],
-                                                 facecolor='white',
-                                                 edgecolor='lightgray',
-                                                 linewidth=1,
-                                                 alpha=1)
-                            ax.add_patch(hex)
-                            
-                            if j==0:
-                                hex = RegularPolygon((xx[(j,i)]*2,
-                                                  yy[(j,i)]*2+(0.8660254*self.mapsize[1]*2)),
-                                                 numVertices=6,
-                                                 radius=1/np.sqrt(3)*bmu_dic[counter],
-                                                 facecolor='white',
-                                                 edgecolor='lightgray',
-                                                 linewidth=1,
-                                                 alpha=1)
-                                ax.add_patch(hex)
-                                
-                            if i==0:
-                                hex = RegularPolygon((xx[(j,i)]*2 + self.mapsize[0]*2 - 1,
-                                                  yy[(j,i)]*2),
-                                                 numVertices=6,
-                                                 radius=1/np.sqrt(3)*bmu_dic[counter],
-                                                 facecolor='white',
-                                                 edgecolor='lightgray',
-                                                 linewidth=1,
-                                                 alpha=1)
-                                ax.add_patch(hex)
-                            
-                            if i==0 and j==0:
-                                hex = RegularPolygon((xx[(j,i)]*2 + self.mapsize[0]*2 - 1,
-                                                  yy[(j,i)]*2+(0.8660254*self.mapsize[1]*2)),
-                                                 numVertices=6,
-                                                 radius=1/np.sqrt(3)*bmu_dic[counter],
-                                                 facecolor='white',
-                                                 edgecolor='lightgray',
-                                                 linewidth=1,
-                                                 alpha=1)
-                                ax.add_patch(hex)
-                        except:
-                            pass
-                            
-                    counter+=1
-
-            # Plot Parameters
-            
-            plt.xlim(0.5, 2*self.mapsize[0]-0.5)
-            plt.ylim(0, 2*self.mapsize[1]*0.8660254)
-
-            f.tight_layout()
-            ax.set_axis_off()
-            plt.gca().invert_yaxis()
-            plt.close()
-
-            os.makedirs("Plots/U_matrix", exist_ok=True)
-
-
-            filename = "Plots/U_matrix/plain_umat.jpg"
-            f.savefig(filename, dpi=300, bbox_inches = "tight")
-
-            # Read the saved image into a NumPy ndarray
-            umat_plain = mpl.image.imread(filename)[30:-30,30:-30]
-            
-            
-            return umat_plain
- 
-        else:
-            # Plotting
-            f = plt.figure(figsize=figsize, dpi=300)
-            
-            gs = gridspec.GridSpec(100, 100)
-            ax = f.add_subplot(gs[:95, 0:90])
-            ax.set_aspect('equal')
-
-            # Normalize colors for all hexagons
-            norm = mpl.colors.Normalize(vmin=np.nanmin(um), vmax=np.nanmax(um))
-            counter = 0
-            
-            if watermark_neurons:
-                # For use to plot number of BMUs
-                nnodes = self.mapsize[0] * self.mapsize[1]
-                grid_bmus = np.linspace(1,nnodes, nnodes).reshape(self.mapsize[1], self.mapsize[0])
-
-            for j in range(self.mapsize[1]):
-                for i in range(self.mapsize[0]):
-                    # Central Hexagon
-                    hex = RegularPolygon((xx[(j, i)]*2,
-                                          yy[(j,i)]*2),
-                                         numVertices=6,
-                                         radius=1/np.sqrt(3),
-                                         facecolor= cm.jet(norm(umat[j][i])),
-                                         alpha=1)#, edgecolor='black')
-
-                    ax.add_patch(hex)
-
-                     # Right Hexagon
-                    if not np.isnan(um[j, i, 0]):
-                        hex = RegularPolygon((xx[(j, i)]*2+1,
-                                              yy[(j,i)]*2),
-                                             numVertices=6,
-                                             radius=1/np.sqrt(3),
-                                             facecolor=cm.jet(norm(um[j,i,0])),
-                                             alpha=1)
-                        ax.add_patch(hex)
-
-                    # Upper Right Hexagon
-                    if not np.isnan(um[j, i, 1]):
-                        hex = RegularPolygon((xx[(j, i)]*2+0.5,
-                                              yy[(j,i)]*2+(np.sqrt(3)/2)),
-                                             numVertices=6,
-                                             radius=1/np.sqrt(3),
-                                             facecolor=cm.jet(norm(um[j,i,1])),
-                                             alpha=1)
-                        ax.add_patch(hex)
-
-                    # Upper Left Hexagon
-                    if not np.isnan(um[j, i, 2]):
-                        hex = RegularPolygon((xx[(j, i)]*2-0.5,
-                                              yy[(j,i)]*2+(np.sqrt(3)/2)),
-                                             numVertices=6,
-                                             radius=1/np.sqrt(3),
-                                             facecolor=cm.jet(norm(um[j,i,2])),
-                                             alpha=1)
-                        ax.add_patch(hex)
-
-                    if watermark_neurons:
-                        # Central Hexagon
-                        hex = RegularPolygon((xx[(j, i)]*2,
-                                              yy[(j,i)]*2),
-                                              numVertices=6,
-                                              radius=2/np.sqrt(3),
-                                              facecolor= "white",
-                                              edgecolor='black',
-                                              alpha=watermark_neurons_alfa)#, edgecolor='black')
-                        ax.add_patch(hex)
-
-                        ax.text(xx[(j,i)]*2, yy[(j,i)]*2, 
-                                s=f"{int(grid_bmus[j,i])}", 
-                                size = neurons_fontsize,
-                                horizontalalignment='center', 
-                                verticalalignment='center', 
-                                color='black')
-
-                    # Plot hits
-                    if hits:
-                        if label_plot:
-                            ind_var = list(self.component_names).index(label_plot_name)
-                            bool_val = self.data_denorm[:,ind_var]
-                            bool_val = np.array([0 if number < 0.5 else 1 for number in bool_val])
-
-                            if counter in self.bmus:
-                                vars_in_hit =  np.array([ind for ind, value in enumerate(self.bmus) if value == counter])
-                                bool_hit = bool_val[vars_in_hit]
-                                bool_hit = statistics.mode(bool_hit)
-
-                                facecolor_hits = "black" if bool_hit == 0 else 'white'
-                            else:
-                                pass
-                        else:
-                            facecolor_hits = 'white'
-
-                        try:
-                            hex = RegularPolygon((xx[(j, i)]*2,
-                                                  yy[(j,i)]*2),
-                                                 numVertices=6,
-                                                 radius=((1/np.sqrt(3))*bmu_dic[counter]),
-                                                 facecolor=facecolor_hits,
-                                                 edgecolor=facecolor_hits,
-                                                 linewidth=1.1,
-                                                 alpha=1)
-                            ax.add_patch(hex)
-                        except:
-                            pass
-                    counter+=1
-
-            if samples_label:
-                if project_samples_label is not None:
-                    samples_label_names = project_samples_label.index.tolist()
-                    som_bmus = (project_samples_label.BMU.values-1).tolist()
-                    rep_samples_dic = select_keys(self.rep_sample(project = project_samples_label), som_bmus)
-                else:
-                    if samples_label_index == "all":
-                        samples_label_names = self.sample_names
-                        samples_label_index = np.arange(0, len(samples_label_names), 1)
-                    else:
-                        samples_label_index = np.array(samples_label_index)
-                        samples_label_names = self.sample_names[samples_label_index]
-                    
-
-                    som_bmus = self.bmus.astype(int)[samples_label_index]
-                    rep_samples_dic = select_keys(self.rep_sample(), som_bmus+1)
-
-                if save_labels_rep:
-                    def filter_dictionary(dictionary, values):
-                        filtered_dict = {}
-                        for key, val in dictionary.items():
-                            if isinstance(val, list):
-                                matching_values = [item for item in val if item in values]
-                                if matching_values:
-                                    filtered_dict[key] = matching_values
-                            else:
-                                if val in values:
-                                    filtered_dict[key] = val
-                        return filtered_dict
-                    
-                    rep_samples_dic_filter = filter_dictionary(rep_samples_dic, samples_label_names)
-                    with open('Results/Representative_samples_umatrix.txt', 'w', encoding='utf-8') as file:
-                        for key, value in rep_samples_dic_filter.items():
-                            if isinstance(value, list):
-                                value = ', '.join(value)
-                            file.write(f'BMU {key+1}: {value}\n')
-                
-                counter = 0
-                for j in range(self.mapsize[1]):
-                    for i in range(self.mapsize[0]):
-                        try:
-                            if isinstance(rep_samples_dic[counter+1], list):
-                                total = len(rep_samples_dic[counter+1])
-                                selected_samples = list(set(samples_label_names).intersection(set(rep_samples_dic[counter+1])))
-                                sample_name, idx_sample = search_strings(selected_samples, rep_samples_dic[counter+1])
-                                rep_sample_name = f"{sample_name}({idx_sample+1}/{total})"
-                                                                
-                            else:
-                                rep_sample_name = rep_samples_dic[counter+1]
-                            
-                            hex = RegularPolygon((xx[(j, i)]*2,
-                                                yy[(j,i)]*2),
-                                                numVertices=6,
-                                                radius=((1/np.sqrt(3))*0.5),
-                                                facecolor='black',
-                                                edgecolor='white',
-                                                linewidth=1.1,
-                                                alpha=1)
-                            ax.add_patch(hex)
-
-                            box_props = {'facecolor': 'white', 'edgecolor': 'black', 'boxstyle': 'round'}
-                            ax.text(xx[(j,i)]*2, yy[(j,i)]*2+1.5*(1/np.sqrt(3)), 
-                                    s=f"{rep_sample_name}", 
-                                    size = samples_label_fontsize,
-                                    horizontalalignment='center', 
-                                    verticalalignment='top', 
-                                    color='black',
-                                    bbox= box_props)
-
-                        except:
-                            pass
-                    
-                        counter+=1
-                    
-
-            # Plot Parameters
-            plt.xlim(-1.1, 2*self.mapsize[0]+0.1)
-            plt.ylim(-0.5660254-0.6, 2*self.mapsize[1]*0.8660254-2*0.560254+0.6)
-            ax.set_axis_off()
-            plt.gca().invert_yaxis()
-
-            # Map title
-            plt.title(fill(title,30),
-                      horizontalalignment='center',
-                      verticalalignment='top',
-                      size=title_size,
-                      pad=title_pad)
-
-            # Legend
-            ax2 = f.add_subplot(gs[30:70, 95:98])
-            cmap = mpl.cm.turbo
-            norm = mpl.colors.Normalize(vmin=np.nanmin(um),
-                                        vmax=np.nanmax(um))
-
-            # Color bar
-            cb1 = mpl.colorbar.ColorbarBase(ax2,
-                                            cmap=cmap,
-                                            norm=norm,
-                                            orientation='vertical')
-            # Legend Parameters
-            cb1.ax.tick_params(labelsize=legend_ticks_size)
-
-            
-            cb1.set_label(fill(legend_title, 20), 
-                          size=legend_title_size, 
-                          labelpad=20)
-            cb1.ax.yaxis.label.set_position(label_title_xy)
-            """
-            # Move the colorbar a little to the right
-            pos = cb1.ax.get_position()
-            pos.x0 += 0.08 * (pos.x1 - pos.x0)
-            pos.x1 += 0.08 * (pos.x1 - pos.x0)
-            cb1.ax.set_position(pos)
-            
-            cb1.ax.yaxis.label.set_position(label_title_xy)"""
-            
-            #ADD WATERMARK
-            # Add white space subplot below the plot
-            ax3 = f.add_subplot(gs[95:100, 0:20], zorder=-1)
-
-            # Add the watermark image to the white space subplot
-            ax3.imshow(self.foot, aspect='equal', alpha=1)
-            ax3.axis('off')
-            
-            plt.subplots_adjust(bottom=3, top = 5,wspace=0)
-            
-            plt.show()
-        
-        if save:
-            if file_path:
-                f.savefig(f"{file_path}/{file_name}.jpg",dpi=300, bbox_inches = "tight")
-            else:
-                # Create directories if they don't exist
-                path = 'Plots/U_matrix'
+            if save:
+                path = (
+                    str(file_path)
+                    if file_path
+                    else "Plots/U_matrix"
+                )
                 os.makedirs(path, exist_ok=True)
 
-                print("Saving.")
-                if hits:
-                    if label_plot:
-                        f.savefig(f"Plots/U_matrix/{file_name}_with_hits_label.jpg",dpi=300, bbox_inches = "tight") 
-                    elif watermark_neurons:
-                        f.savefig(f"Plots/U_matrix/{file_name}_with_hits_watermarkneurons.jpg",dpi=300, bbox_inches = "tight") 
-                    else:
-                        f.savefig(f"Plots/U_matrix/{file_name}_with_hits.jpg",dpi=300, bbox_inches = "tight")
+                Image.fromarray(image).save(
+                    os.path.join(
+                        path,
+                        f"{file_name}_texture.jpg",
+                    ),
+                    quality=95,
+                )
+
+            return image
+
+        (
+            node_centers,
+            node_values,
+            edge_centers,
+            edge_values,
+        ) = self._umatrix_geometry(
+            um,
+            umat,
+        )
+
+        fig = plt.figure(
+            figsize=figsize,
+            dpi=300,
+        )
+
+        gs = gridspec.GridSpec(
+            100,
+            100,
+            figure=fig,
+        )
+        ax = fig.add_subplot(
+            gs[:95, 0:90]
+        )
+        ax.set_aspect("equal")
+
+        # Draw all U-Matrix cells in two vectorized collections.
+        self._add_value_cells(
+            ax,
+            node_centers,
+            node_values,
+            cmap=cmap_obj,
+            norm=norm,
+            zorder=1,
+        )
+        self._add_value_cells(
+            ax,
+            edge_centers,
+            edge_values,
+            cmap=cmap_obj,
+            norm=norm,
+            zorder=1,
+        )
+
+        # Optional neuron-number watermark.
+        if watermark_neurons:
+            self._add_solid_cells(
+                ax,
+                node_centers,
+                facecolors="white",
+                edgecolors="black",
+                linewidths=0.6,
+                alpha=watermark_neurons_alfa,
+                sizes=2.0,
+                zorder=2,
+            )
+
+            for node_ind, (x, y) in enumerate(
+                node_centers,
+                start=1,
+            ):
+                ax.text(
+                    x,
+                    y,
+                    str(node_ind),
+                    size=neurons_fontsize,
+                    ha="center",
+                    va="center",
+                    color="black",
+                    zorder=5,
+                )
+
+        # Hits.
+        if hits:
+            hit_sizes_dict = self.hits_dictionary
+            hit_nodes = np.array(
+                sorted(hit_sizes_dict.keys()),
+                dtype=int,
+            )
+
+            if hit_nodes.size:
+                valid = (
+                    (hit_nodes >= 0)
+                    & (hit_nodes < node_centers.shape[0])
+                )
+                hit_nodes = hit_nodes[valid]
+
+                hit_centers = node_centers[hit_nodes]
+                hit_sizes = np.array(
+                    [
+                        hit_sizes_dict[int(node)]
+                        for node in hit_nodes
+                    ],
+                    dtype=float,
+                )
+
+                facecolors = np.full(
+                    hit_nodes.size,
+                    "white",
+                    dtype=object,
+                )
+
+                if label_plot:
+                    if label_plot_name is None:
+                        raise ValueError(
+                            "label_plot_name must be provided when "
+                            "label_plot=True."
+                        )
+
+                    try:
+                        ind_var = list(
+                            self.component_names
+                        ).index(label_plot_name)
+                    except ValueError as exc:
+                        raise ValueError(
+                            f"Unknown component {label_plot_name!r}."
+                        ) from exc
+
+                    bool_val = (
+                        self.data_denorm[:, ind_var] >= 0.5
+                    ).astype(int)
+
+                    # Majority label per BMU. This avoids repeatedly scanning
+                    # all samples inside the plotting loop.
+                    for pos, node in enumerate(hit_nodes):
+                        values = bool_val[
+                            self.bmus == node
+                        ]
+
+                        if values.size:
+                            # Binary mode; ties resolve to 0, matching a
+                            # conservative "absence" interpretation.
+                            ones = int(np.count_nonzero(values))
+                            zeros = int(values.size - ones)
+                            facecolors[pos] = (
+                                "white"
+                                if ones > zeros
+                                else "black"
+                            )
+
+                self._add_solid_cells(
+                    ax,
+                    hit_centers,
+                    facecolors=facecolors,
+                    edgecolors=facecolors,
+                    linewidths=1.1,
+                    sizes=hit_sizes,
+                    zorder=4,
+                )
+
+        # Selected sample labels.
+        if samples_label:
+            if project_samples_label is not None:
+                samples_label_names = np.asarray(
+                    project_samples_label.index.tolist()
+                )
+                som_bmus = (
+                    np.asarray(
+                        project_samples_label.BMU.values,
+                        dtype=int,
+                    )
+                    - 1
+                )
+                representative = self.rep_sample(
+                    project=project_samples_label
+                )
+            else:
+                if isinstance(
+                    samples_label_index,
+                    str,
+                ) and samples_label_index.lower() == "all":
+                    selected_indices = np.arange(
+                        len(self.sample_names),
+                        dtype=int,
+                    )
                 else:
-                    if label_plot:
-                        f.savefig(f"Plots/U_matrix/{file_name}_with_label.jpg",dpi=300, bbox_inches = "tight") 
-                    elif watermark_neurons:
-                        f.savefig(f"Plots/U_matrix/{file_name}_watermarkneurons.jpg",dpi=300, bbox_inches = "tight") 
-                    else:
-                        f.savefig(f"Plots/U_matrix/{file_name}.jpg",dpi=300, bbox_inches = "tight")
+                    if samples_label_index is None:
+                        raise ValueError(
+                            "samples_label_index must be provided when "
+                            "samples_label=True, or use 'all'."
+                        )
+                    selected_indices = np.asarray(
+                        samples_label_index,
+                        dtype=int,
+                    ).reshape(-1)
 
+                samples_label_names = self.sample_names[
+                    selected_indices
+                ]
+                som_bmus = self.bmus[
+                    selected_indices
+                ]
+                representative = self.rep_sample()
 
-    def component_plot(self,
-                       component_name = 0,
-                       figsize = (10,10),
-                       title = None,
-                       full_title = False,
-                       title_size = 30,
-                       title_pad = 25,
-                       legend_title = False,
-                       legend_pad = 0,
-                       label_title_xy = (0,0.5),
-                       legend_title_size = 24,
-                       legend_ticks_size = 20,
-                       save = False,
-                       file_name = None,
-                       file_path = False,
-                       collage = False):
+            selected_names_set = set(
+                map(str, samples_label_names)
+            )
+            selected_bmus = set(
+                int(v) + 1
+                for v in np.asarray(som_bmus).reshape(-1)
+            )
+
+            representative = {
+                key: value
+                for key, value in representative.items()
+                if key in selected_bmus
+            }
+
+            if save_labels_rep:
+                os.makedirs(
+                    "Results",
+                    exist_ok=True,
+                )
+                with open(
+                    "Results/Representative_samples_umatrix.txt",
+                    "w",
+                    encoding="utf-8",
+                ) as file:
+                    for key, value in representative.items():
+                        if isinstance(value, list):
+                            filtered = [
+                                item
+                                for item in value
+                                if str(item) in selected_names_set
+                            ]
+                            if not filtered:
+                                continue
+                            out_value = ", ".join(
+                                map(str, filtered)
+                            )
+                        else:
+                            if str(value) not in selected_names_set:
+                                continue
+                            out_value = str(value)
+
+                        file.write(
+                            f"BMU {key}: {out_value}\n"
+                        )
+
+            # One annotation per selected BMU.
+            for bmu_1based, rep_value in representative.items():
+                node = int(bmu_1based) - 1
+
+                if not (
+                    0 <= node < node_centers.shape[0]
+                ):
+                    continue
+
+                if isinstance(rep_value, list):
+                    selected = [
+                        item
+                        for item in rep_value
+                        if str(item) in selected_names_set
+                    ]
+                    if not selected:
+                        continue
+
+                    # Use the earliest representative among the selected
+                    # samples.
+                    indices = [
+                        rep_value.index(item)
+                        for item in selected
+                    ]
+                    best_local = int(np.argmin(indices))
+                    sample_name = selected[best_local]
+                    idx_sample = indices[best_local]
+                    rep_name = (
+                        f"{sample_name}"
+                        f"({idx_sample + 1}/{len(rep_value)})"
+                    )
+                else:
+                    if str(rep_value) not in selected_names_set:
+                        continue
+                    rep_name = str(rep_value)
+
+                center = node_centers[
+                    node
+                ]
+
+                self._add_solid_cells(
+                    ax,
+                    center.reshape(1, 2),
+                    facecolors="black",
+                    edgecolors="white",
+                    linewidths=1.1,
+                    sizes=0.5,
+                    zorder=5,
+                )
+
+                vertical_offset = (
+                    1.5 / np.sqrt(3.0)
+                    if self.lattice == "hexa"
+                    else 0.9
+                )
+
+                ax.text(
+                    center[0],
+                    center[1] + vertical_offset,
+                    rep_name,
+                    size=samples_label_fontsize,
+                    ha="center",
+                    va="top",
+                    color="black",
+                    bbox={
+                        "facecolor": "white",
+                        "edgecolor": "black",
+                        "boxstyle": "round",
+                    },
+                    zorder=6,
+                )
+
+        # Limits are derived from actual geometry, not rows/cols formulas.
+        all_centers = np.vstack(
+            [
+                node_centers,
+                edge_centers[
+                    np.isfinite(edge_values)
+                ],
+            ]
+        )
+        self._set_map_limits(
+            ax,
+            all_centers,
+            pad=0.8,
+            invert_y=True,
+        )
+
+        ax.set_title(
+            fill(str(title), 30),
+            size=title_size,
+            pad=title_pad,
+        )
+
+        # Colorbar uses the same colormap as the map itself.
+        ax2 = fig.add_subplot(
+            gs[30:70, 95:98]
+        )
+
+        scalar_mappable = mpl.cm.ScalarMappable(
+            norm=norm,
+            cmap=cmap_obj,
+        )
+        cb1 = fig.colorbar(
+            scalar_mappable,
+            cax=ax2,
+            orientation="vertical",
+        )
+        cb1.ax.tick_params(
+            labelsize=legend_ticks_size
+        )
+        cb1.set_label(
+            fill(str(legend_title), 20),
+            size=legend_title_size,
+            labelpad=20,
+        )
+        cb1.ax.yaxis.label.set_position(
+            label_title_xy
+        )
+
+        self._add_watermark_subplot(
+            fig,
+            gs,
+        )
+
+        if save:
+            if file_path:
+                path = str(file_path)
+            else:
+                path = "Plots/U_matrix"
+
+            os.makedirs(
+                path,
+                exist_ok=True,
+            )
+
+            if hits:
+                if label_plot:
+                    suffix = "_with_hits_label"
+                elif watermark_neurons:
+                    suffix = "_with_hits_watermarkneurons"
+                else:
+                    suffix = "_with_hits"
+            else:
+                if label_plot:
+                    suffix = "_with_label"
+                elif watermark_neurons:
+                    suffix = "_watermarkneurons"
+                else:
+                    suffix = ""
+
+            fig.savefig(
+                os.path.join(
+                    path,
+                    f"{file_name}{suffix}.jpg",
+                ),
+                dpi=300,
+                bbox_inches="tight",
+            )
+
+        plt.show()
+        return fig
+
+    # ------------------------------------------------------------------
+    # COMPONENT PLOTS
+    # ------------------------------------------------------------------
+
+    def _resolve_component(
+        self,
+        component_name,
+    ):
         """
-        Function to perform the plotting of a trained variable map.
+        Resolve a component index/name and reshape values correctly.
 
-            Args:
-                component_name: the name of the variable you want to plot. It is
-                    accept the variable name in the form of a string or an integer
-                    number related to the index of that variable in the initial
-                    variables list.
-
-                figsize: size of the variable's plot screen.
-                    Default: (10,10)
-
-                title: title of the created figure. Default: "U-Matrix"
-
-                title_size: size of the plotted title. Default: 40
-
-                title_pad: spacing between the title and the top of the map.
-                    Default: 25
-
-                legend_title: title of the color bar legend.
-                    Default: "Distance"
-
-                legend_pad: spacing between the legend title and the map.
-                    Default: 0
-
-                y_legend: spacing between legend title and bottom
-                    of the figure. Default: 1.12
-
-                legend_title_size = subtitle title size. Default: 24.
-
-                legend_ticks_size = size of the color bar digits of the
-                    subtitle. Default: 20.
-
-                save: boolean to define the saving of the created image.
-                    This saving will be done in the directory (Plots/Component_plots).
-                    Default: True.
-
-                file_name: the name that will be given to the saved file. If no name
-                    is given, the name of the project will be used.
-
-                file_path: the path on the system where the image should be
-                    saved in case you do not choose to use the default path.
-
-            Returns:
-                The image plotting the variable map.
+        mapsize = (columns, rows)
+        ndarray shape = (rows, columns)
         """
-        def check_path(filename):
-            # Check if the file already exists in the directory
-            if os.path.isfile(filename):
-                # Extract the filename and extension
-                name, ext = os.path.splitext(filename)
+        if isinstance(
+            component_name,
+            (int, np.integer),
+        ):
+            index = int(component_name)
 
-                # Append a number to the filename to make it unique
-                i = 1
-                while os.path.isfile(f"{name}_{i}{ext}"):
-                    i += 1
-
-                # Change the filename to the unique name
-                filename = f"{name}_{i}{ext}"
-            
-            return filename
-        
-        if file_name is None:
-            file_name = f"Component_plot_{self.name}"
-
-        if isinstance(component_name, int):
-            # Pegar uma variavel
-            bmu_var = self.neuron_matrix[:,component_name].reshape(self.mapsize[1], self.mapsize[0])
-            var_name = self.component_names[component_name]
-
-            # Captar unidade da legenda
-            if not legend_title:
-                legend_title = self.unit_names[component_name]
-                
-        elif isinstance(component_name, str):
-            index = list(self.component_names).index(component_name)
-            bmu_var = self.neuron_matrix[:, index].reshape(self.mapsize[1], self.mapsize[0])
-            var_name = self.component_names[index]
-            # Captar unidade da legenda
-            if not legend_title:
-                legend_title = self.unit_names[index]
+            if not (
+                0 <= index < self.neuron_matrix.shape[1]
+            ):
+                raise IndexError(
+                    f"Component index {index} is out of bounds."
+                )
+        elif isinstance(
+            component_name,
+            str,
+        ):
+            try:
+                index = list(
+                    self.component_names
+                ).index(component_name)
+            except ValueError as exc:
+                raise ValueError(
+                    f"Unknown component {component_name!r}."
+                ) from exc
         else:
-            print("Wrong name for component, accepts only string with component name or int with its position")
+            raise TypeError(
+                "component_name must be a component name or integer index."
+            )
 
-        # Create coordinates
-        xx = np.reshape(self.generate_hex_lattice(self.mapsize[0], self.mapsize[1])[:,0], (self.mapsize[1], self.mapsize[0]))
-        yy = np.reshape(self.generate_hex_lattice(self.mapsize[0], self.mapsize[1])[:,1], (self.mapsize[1], self.mapsize[0]))
+        values = self.neuron_matrix[
+            :,
+            index,
+        ].reshape(
+            self.rows,
+            self.cols,
+        )
 
-        # Plotting
-        f = plt.figure(figsize=figsize,dpi=300)
-        gs = gridspec.GridSpec(100, 20)
-        ax = f.add_subplot(gs[:95, 0:19])
-        ax.set_aspect('equal')
+        return (
+            index,
+            self.component_names[index],
+            values,
+        )
 
-        # Normalize colors for all hexagons
-        norm = mpl.colors.Normalize(vmin=np.nanmin(bmu_var), vmax=np.nanmax(bmu_var))
+    def component_plot(
+        self,
+        component_name=0,
+        figsize=(10, 10),
+        title=None,
+        full_title=False,
+        title_size=30,
+        title_pad=25,
+        legend_title=False,
+        legend_pad=0,
+        label_title_xy=(0, 0.5),
+        legend_title_size=24,
+        legend_ticks_size=20,
+        save=False,
+        file_name=None,
+        file_path=False,
+        collage=False,
+        cmap="jet",
+    ):
+        """
+        Plot one trained component for hexagonal or rectangular lattices.
 
-        # Fill the plot with the hexagons
-        for j in range(self.mapsize[1]):
-            for i in range(self.mapsize[0]):
-                ax.add_patch(RegularPolygon((xx[(j, i)], yy[(j,i)]),
-                                     numVertices=6,
-                                     radius=1/np.sqrt(3),
-                                     facecolor=cm.jet(norm(bmu_var[j,i])),
-                                     alpha=1))
+        The map geometry is generated using ``mapsize=(columns, rows)`` and
+        values are reshaped as ``(rows, columns)``.
+        """
+        (
+            index,
+            var_name,
+            bmu_var,
+        ) = self._resolve_component(
+            component_name
+        )
 
-        plt.xlim(-0.5, self.mapsize[0]+0.5)
-        plt.ylim(-0.5660254, self.mapsize[1]*0.8660254+2*0.560254)
-        ax.set_axis_off()
-        plt.gca().invert_yaxis()
+        if not legend_title:
+            legend_title = self.unit_names[
+                index
+            ]
 
-        # Map title
+        xx, yy = self._node_coordinates()
+        centers = np.column_stack(
+            [
+                xx.ravel(),
+                yy.ravel(),
+            ]
+        )
+        values = bmu_var.ravel()
+
+        norm = self._safe_norm(values)
+        cmap_obj = mpl.colormaps[cmap]
+
+        fig = plt.figure(
+            figsize=figsize,
+            dpi=300,
+        )
+        gs = gridspec.GridSpec(
+            100,
+            20,
+            figure=fig,
+        )
+        ax = fig.add_subplot(
+            gs[:95, 0:19]
+        )
+        ax.set_aspect("equal")
+
+        self._add_value_cells(
+            ax,
+            centers,
+            values,
+            cmap=cmap_obj,
+            norm=norm,
+            edgecolors="none",
+            zorder=1,
+        )
+
+        self._set_map_limits(
+            ax,
+            centers,
+            pad=0.7,
+            invert_y=True,
+        )
+
         if full_title:
-            name = title if title is not None else var_name
+            name = (
+                title
+                if title is not None
+                else str(var_name)
+            )
         else:
             if title is not None:
                 name = title
             else:
-                name = var_name.split()
-                name = f"{name[0]} {name[1]}" if len(name)>1 else f"{name[0]}"
-        plt.title(fill(f"{name}",20), horizontalalignment='center',  verticalalignment='top', size=title_size, pad=title_pad)
+                split_name = str(
+                    var_name
+                ).split()
+                name = " ".join(
+                    split_name[:2]
+                )
 
-        # Legend
-        ax2 = f.add_subplot(gs[27:70, 19])
-        cmap = mpl.cm.turbo
-        norm = mpl.colors.Normalize(vmin=np.nanmin(bmu_var), vmax=np.nanmax(bmu_var))
-        cb1 = mpl.colorbar.ColorbarBase(ax2,
-                                        cmap=cmap,
-                                        norm=norm,
-                                        orientation='vertical')
+        ax.set_title(
+            fill(str(name), 20),
+            size=title_size,
+            pad=title_pad,
+        )
 
-        cb1.ax.tick_params(labelsize=legend_ticks_size)
-        # Put the caption title if it has a variable name
-        cb1.set_label(fill(legend_title,15),
-                      size=legend_title_size,
-                      labelpad=legend_pad,
-                      horizontalalignment='right',
-                      wrap=True)
-        
-        cb1.ax.yaxis.label.set_position(label_title_xy)
-        if collage == False:
-            #ADD WATERMARK
-            # Add white space subplot below the plot
-            ax3 = f.add_subplot(gs[95:100, 0:4], zorder=-1)
+        ax2 = fig.add_subplot(
+            gs[27:70, 19]
+        )
+        scalar_mappable = mpl.cm.ScalarMappable(
+            norm=norm,
+            cmap=cmap_obj,
+        )
+        cb1 = fig.colorbar(
+            scalar_mappable,
+            cax=ax2,
+            orientation="vertical",
+        )
+        cb1.ax.tick_params(
+            labelsize=legend_ticks_size
+        )
+        cb1.set_label(
+            fill(str(legend_title), 15),
+            size=legend_title_size,
+            labelpad=legend_pad,
+            horizontalalignment="right",
+            wrap=True,
+        )
+        cb1.ax.yaxis.label.set_position(
+            label_title_xy
+        )
 
-            # Add the watermark image to the white space subplot
-            ax3.imshow(self.foot, aspect='equal', alpha=1)
-            ax3.axis('off')
-        
-        plt.subplots_adjust(bottom=3, top = 5,wspace=0)
-        if full_title:
-            if isinstance(var_name, str):
-                label_name = var_name.replace("/", "")
-            else:
-                label_name = var_name
-        else:
-            if isinstance(var_name, str):
-                label_name = var_name[:7].replace(" ", "").replace(":", "")
-            else:
-                label_name = var_name[:6]
+        if not collage:
+            self._add_watermark_subplot(
+                fig,
+                gs,
+                grid_slice=(slice(95, 100), slice(0, 4)),
+            )
+
+        label_name = self._component_label_name(
+            var_name,
+            full_title=full_title,
+        )
 
         if collage:
-            path = 'Plots/Component_plots/Collage/temp'
-            os.makedirs(path, exist_ok=True)
-            path_name = check_path(f"Plots/Component_plots/Collage/temp/{label_name}.jpg")
-            f.savefig(path_name,dpi=300, bbox_inches = "tight")
+            path = (
+                "Plots/Component_plots/"
+                "Collage/temp"
+            )
+            os.makedirs(
+                path,
+                exist_ok=True,
+            )
+            path_name = self._unique_path(
+                os.path.join(
+                    path,
+                    f"{label_name}.jpg",
+                )
+            )
+            fig.savefig(
+                path_name,
+                dpi=300,
+                bbox_inches="tight",
+            )
 
         if save:
-            label_name = file_name if file_name is not None else label_name
-            if file_path:
-                path_name = check_path(f"{file_path}/{label_name}.jpg")
-                f.savefig(path_name,dpi=300, bbox_inches = "tight")
-            else:
-                path = 'Plots/Component_plots'
-                os.makedirs(path, exist_ok=True)
-                path_name = check_path(f"Plots/Component_plots/{label_name}.jpg")
-                f.savefig(path_name,dpi=300, bbox_inches = "tight")
+            if file_name is not None:
+                label_name = file_name
 
-    def multiple_component_plots(self,
-                                wich = "all",
-                                figsize = (10,10),
-                                full_title = False,
-                                title_size = 30,
-                                title_pad = 25,
-                                legend_title = "Presence",
-                                legend_pad = 0,
-                                label_title_xy = (0,0.5),
-                                legend_title_size = 24,
-                                legend_ticks_size = 20,
-                                save = True,
-                                file_path = False, 
-                                collage = False):
-        """
-        Function for plotting a list or all variables trained in the
-        SOM object.
+            path = (
+                str(file_path)
+                if file_path
+                else "Plots/Component_plots"
+            )
+            os.makedirs(
+                path,
+                exist_ok=True,
+            )
+            path_name = self._unique_path(
+                os.path.join(
+                    path,
+                    f"{label_name}.jpg",
+                )
+            )
+            fig.savefig(
+                path_name,
+                dpi=300,
+                bbox_inches="tight",
+            )
 
-        Args:
-            wich: list of variables to be plotted and saved or "all" for
-            plotting all variables.
+        return fig
+
+    def multiple_component_plots(
+        self,
+        wich="all",
+        figsize=(10, 10),
+        full_title=False,
+        title_size=30,
+        title_pad=25,
+        legend_title="Presence",
+        legend_pad=0,
+        label_title_xy=(0, 0.5),
+        legend_title_size=24,
+        legend_ticks_size=20,
+        save=True,
+        file_path=False,
+        collage=False,
+        cmap="jet",
+    ):
         """
-        if isinstance(wich, str):
-            iterator = self.component_names
+        Plot multiple components.
+
+        ``wich`` may be ``"all"`` or an iterable of component names/indices.
+        """
+        if isinstance(
+            wich,
+            str,
+        ):
+            if wich != "all":
+                raise ValueError(
+                    "wich must be 'all' or an iterable of component names/indices."
+                )
+            iterator = list(
+                self.component_names
+            )
         else:
-            iterator = wich
+            iterator = list(wich)
 
-        # Iteração sobre a função de plotagem individual
-        pbar = tqdm(iterator, mininterval=1)
+        pbar = tqdm(
+            iterator,
+            mininterval=1,
+        )
+
         for name in pbar:
-            pbar.set_description(f"Component: {name}")
-            self.component_plot(component_name = name,
-                               figsize = figsize,
-                               full_title = full_title,
-                               title_size = title_size,
-                               title_pad = title_pad,
-                               legend_title = legend_title,
-                               legend_title_size = legend_title_size,
-                               legend_ticks_size = legend_ticks_size,
-                               legend_pad = legend_pad,
-                               label_title_xy= label_title_xy,
-                               save = save,
-                               file_path = file_path,
-                               collage = collage)
-            plt.close()
+            pbar.set_description(
+                f"Component: {name}"
+            )
+
+            fig = self.component_plot(
+                component_name=name,
+                figsize=figsize,
+                full_title=full_title,
+                title_size=title_size,
+                title_pad=title_pad,
+                legend_title=legend_title,
+                legend_title_size=legend_title_size,
+                legend_ticks_size=legend_ticks_size,
+                legend_pad=legend_pad,
+                label_title_xy=label_title_xy,
+                save=save,
+                file_path=file_path,
+                collage=collage,
+                cmap=cmap,
+            )
+            plt.close(fig)
 
         print("Finished")
 
-
-
-    def component_plot_collage(self,
-                               page_size = (2480, 3508), # A4 em pixels
-                               grid = (4,4),
-                               wich = "all",
-                               figsize = (10,10),
-                               full_title = False,
-                               title_size = 30,
-                               title_pad = 25,
-                               legend_title = "Presence",
-                               legend_title_size = 24,
-                               legend_ticks_size = 20,
-                               legend_pad = 0,
-                               label_title_xy = (0,0.5),
-                               file_path=False):
+    def component_plot_collage(
+        self,
+        page_size=(2480, 3508),
+        grid=(4, 4),
+        wich="all",
+        figsize=(10, 10),
+        full_title=False,
+        title_size=30,
+        title_pad=25,
+        legend_title="Presence",
+        legend_title_size=24,
+        legend_ticks_size=20,
+        legend_pad=0,
+        label_title_xy=(0, 0.5),
+        file_path=False,
+        cmap="jet",
+    ):
         """
-        Function to create a collage of training component maps
-        (Component Plots).
+        Create A4-style collage pages from component plots.
 
-        Args:
-            page_size: size of the plot collage page in pixels.
-                Default: A4 (2480, 3508)
-
-            grid: the format of the collage grid. Default: (4,4)
-
-            wich: list of variables to be pasted and saved or "all" for
-                plotting all variables.
-
-            title_size: size of the plotted title. Default: 30
-
-            title_pad: spacing between the title and the top of the array.
-                Default: 25
-
-            legend_title: title of the legend color bar.
-                Default: "Presence"
-
-            legend_pad: spacing between the legend title and the U matrix.
-                Default: 0
-
-            y_legend: spacing between legend title and bottom
-                of the figure. Default: 1.12
-
-            legend_title_size = subtitle title size. Default: 24.
-
-            legend_ticks_size = size of the color bar digits of the
-                subtitle. Default: 20.
-
-            file_path = path to disired directory to save your collage.
+        ``grid`` is interpreted as ``(rows, columns)`` because it describes
+        a page layout, not a SOM mapsize.
         """
-        # Support function only for using inside the function
-        def resize_image(image, page, grid):
-            """
-           Function to resize the image on the sheet according to the defined
-            grid.
+        grid_rows, grid_cols = (
+            int(grid[0]),
+            int(grid[1]),
+        )
 
-            Args:
-                image: the image that should be scaled in the grid.
+        if (
+            grid_rows <= 0
+            or grid_cols <= 0
+        ):
+            raise ValueError(
+                "grid values must be greater than zero."
+            )
 
-                page: The page dimensions for the collage.
+        if isinstance(
+            wich,
+            str,
+        ):
+            if wich != "all":
+                raise ValueError(
+                    "wich must be 'all' or an iterable of component names/indices."
+                )
+            list_figs = list(
+                self.component_names
+            )
+        else:
+            list_figs = list(wich)
 
-                grid: the format of the collage grid.
-            """
-            max_hor = page.size[0] / grid[1]
-            max_ver = page.size[1] / grid[0]
+        n_components = len(
+            list_figs
+        )
 
-            image.thumbnail((max_hor, max_ver))
+        if n_components == 0:
+            raise ValueError(
+                "No components were selected."
+            )
 
-            return image
+        temp_dir = (
+            "Plots/Component_plots/"
+            "Collage/temp"
+        )
+        os.makedirs(
+            temp_dir,
+            exist_ok=True,
+        )
+
+        # Avoid mixing stale images from previous runs.
+        for old_file in glob.glob(
+            os.path.join(
+                temp_dir,
+                "*.jpg",
+            )
+        ):
+            try:
+                os.remove(old_file)
+            except OSError:
+                pass
 
         print("Generating maps...")
-        # List component plots that haven't been made yet
-        if isinstance(wich, str):
-            if wich == "all":
-                list_figs = "all"  
-                n_components = len(self.component_names)
-            else:
-                print("The accepted parameters are 'all' or a list of variables or variable indexes.")
-        if isinstance(wich, list):
-            list_figs = wich
-            n_components = len(wich)
 
-        # Create component plots that have not been previously generated
-        self.multiple_component_plots(wich = list_figs,
-                                      figsize = figsize,
-                                      full_title = full_title,
-                                      title_size = title_size,
-                                      title_pad = title_pad,
-                                      save=False,
-                                      legend_title = legend_title,
-                                      legend_title_size = legend_title_size,
-                                      legend_ticks_size = legend_ticks_size,
-                                      legend_pad = legend_pad,
-                                      label_title_xy = label_title_xy,
-                                      collage = True)
-        # Acquire the path for all images
-        images_path = glob.glob('Plots/Component_plots/Collage/temp/*.jpg')
+        self.multiple_component_plots(
+            wich=list_figs,
+            figsize=figsize,
+            full_title=full_title,
+            title_size=title_size,
+            title_pad=title_pad,
+            save=False,
+            legend_title=legend_title,
+            legend_title_size=legend_title_size,
+            legend_ticks_size=legend_ticks_size,
+            legend_pad=legend_pad,
+            label_title_xy=label_title_xy,
+            collage=True,
+            cmap=cmap,
+        )
 
-        # Number of pages needed to populate the components in the grid
-        n_pages = int(n_components/(grid[0]*grid[1]))+1
+        images_path = sorted(
+            glob.glob(
+                os.path.join(
+                    temp_dir,
+                    "*.jpg",
+                )
+            )
+        )
 
-        # Number of images per page
-        im_pp = grid[0]*grid[1]
+        images_per_page = (
+            grid_rows * grid_cols
+        )
+        n_pages = int(
+            np.ceil(
+                n_components
+                / images_per_page
+            )
+        )
+
+        output_dir = (
+            str(file_path)
+            if file_path
+            else (
+                "Plots/Component_plots/"
+                "Collage/pages"
+            )
+        )
+        os.makedirs(
+            output_dir,
+            exist_ok=True,
+        )
 
         print("Generating collage...")
-        for i in range(n_pages):
-            # Image to make the collage
-            page = Image.new("RGB", page_size, "WHITE")  # White background
 
-            # Slicing image paths for each page
-            images_path_page = images_path[i*im_pp:(i+1)*im_pp]
-            xx = np.tile(np.arange(grid[1]), grid[0])
-            yy = np.repeat(np.arange(grid[0]), grid[1])
+        for page_index in range(
+            n_pages
+        ):
+            page = Image.new(
+                "RGB",
+                page_size,
+                "WHITE",
+            )
 
-            for j, img_path in enumerate(images_path_page):
-                img = Image.open(img_path) 
-                img = resize_image(img, page, grid)
-                x_pos = int(xx[j] * page_size[0] / grid[1])
-                y_pos = int(yy[j] * page_size[1] / grid[0])
-                page.paste(img, (x_pos, y_pos))
+            page_paths = images_path[
+                page_index
+                * images_per_page:
+                (page_index + 1)
+                * images_per_page
+            ]
 
-            # Save at plots root directory
-            path = 'Plots/Component_plots/Collage/pages'
-            os.makedirs(path, exist_ok=True)
-            
-            foot = self.foot
-            max_height = page_size[1]/40
-            width = int((foot.width / foot.height) * max_height)
-            foot.thumbnail((width, max_height))
-            x = 0  # Left position
-            y = page.height - foot.height  # Down position
-            page.paste(foot, (x, y))
-            
-            if file_path:
-                page.save(f"{file_path}/Component_plots_collage_page{i+1}.jpg")
-            else:
-                page.save(f"Plots/Component_plots/Collage/pages/Component_plots_collage_page{i+1}.jpg")
+            for item_index, img_path in enumerate(
+                page_paths
+            ):
+                with Image.open(
+                    img_path
+                ) as source:
+                    img = source.copy()
+
+                max_width = (
+                    page_size[0]
+                    / grid_cols
+                )
+                max_height = (
+                    page_size[1]
+                    / grid_rows
+                )
+
+                img.thumbnail(
+                    (
+                        int(max_width),
+                        int(max_height),
+                    )
+                )
+
+                page_row = (
+                    item_index // grid_cols
+                )
+                page_col = (
+                    item_index % grid_cols
+                )
+
+                x_pos = int(
+                    page_col
+                    * page_size[0]
+                    / grid_cols
+                )
+                y_pos = int(
+                    page_row
+                    * page_size[1]
+                    / grid_rows
+                )
+
+                page.paste(
+                    img,
+                    (
+                        x_pos,
+                        y_pos,
+                    ),
+                )
+
+            if self.foot is not None:
+                foot = self.foot.copy()
+                max_height = int(
+                    page_size[1] / 40
+                )
+                width = int(
+                    (
+                        foot.width
+                        / foot.height
+                    )
+                    * max_height
+                )
+                foot.thumbnail(
+                    (
+                        width,
+                        max_height,
+                    )
+                )
+                page.paste(
+                    foot,
+                    (
+                        0,
+                        page.height
+                        - foot.height,
+                    ),
+                )
+
+            page.save(
+                os.path.join(
+                    output_dir,
+                    (
+                        "Component_plots_"
+                        f"collage_page{page_index + 1}.jpg"
+                    ),
+                ),
+                quality=95,
+            )
 
         print("Finished.")
-        print("The folder 'Plots/Component_plots/Collage/temp' can be deleted.")
-    
-    def bmu_template(self, 
-                     figsize = (10,10),
-                     title_size = 24,
-                     fontsize = 10,
-                     save = False,
-                     file_name = None,
-                     file_path = False):
+
+    # ------------------------------------------------------------------
+    # BMU TEMPLATE
+    # ------------------------------------------------------------------
+
+    def bmu_template(
+        self,
+        figsize=(10, 10),
+        title_size=24,
+        fontsize=10,
+        save=False,
+        file_name=None,
+        file_path=False,
+    ):
         """
-        Generates the BMU map for the current Kohonen map.        
-
-        Args:
-                figsize: size of the variable's plot screen.
-                    Default: (10,10)
-
-                title_size: size of the plotted title. Default: 24
-                    
-                fontsize: Default: 10
-
-                save: boolean to define the saving of the created image.
-                    This saving will be done in the directory (Plots/Bmu_template).
-                    Default: False.
-
-                file_name: the name that will be given to the saved file. If no name
-                    is given, the name of the project will be used.
-
-                file_path: the path on the system where the image should be
-                    saved in case you do not choose to use the default path.
+        Plot the neuron numbering template for either lattice type.
         """
+        if file_name is None:
+            file_name = self.name
 
-        # Create coordinates
-        xx = np.reshape(self.generate_hex_lattice(self.mapsize[0], self.mapsize[1])[:,0], (self.mapsize[1], self.mapsize[0]))
-        yy = np.reshape(self.generate_hex_lattice(self.mapsize[0], self.mapsize[1])[:,1], (self.mapsize[1], self.mapsize[0]))
+        xx, yy = self._node_coordinates()
+        centers = np.column_stack(
+            [
+                xx.ravel(),
+                yy.ravel(),
+            ]
+        )
 
-        # Plotting
-        f = plt.figure(figsize=figsize, dpi=300)
-        gs = gridspec.GridSpec(100, 20)
-        ax = f.add_subplot(gs[:, 0:20])
-        ax.set_aspect('equal')
+        nnodes = (
+            self.cols * self.rows
+        )
+        node_ids = np.arange(
+            1,
+            nnodes + 1,
+            dtype=int,
+        )
 
-        # Normalize colors for all hexagons
-        norm = mpl.colors.Normalize(vmin=0, vmax=1)
-        
-        # Create numbering
-        nnodes = self.mapsize[0] * self.mapsize[1]
-        grid_bmus = np.linspace(1,nnodes, nnodes).reshape(self.mapsize[1], self.mapsize[0])
+        row_ids = np.repeat(
+            np.arange(self.rows),
+            self.cols,
+        )
+        col_ids = np.tile(
+            np.arange(self.cols),
+            self.rows,
+        )
 
-        # Fill the plot with the hexagons
-        for j in range(self.mapsize[1]):
-            for i in range(self.mapsize[0]):
-                hex = RegularPolygon((xx[(j,i)], yy[(j,i)]), 
-                                     numVertices=6, 
-                                     radius=1/np.sqrt(3), facecolor=[cm.Pastel1(norm(0.2)) if i%2==0 else cm.Pastel1(norm(0.6))][0],
-                                     alpha= [0.3 if j%2==0 else 0.8][0], 
-                                     edgecolor='gray'
-                                    )
-                ax.add_patch(hex)
-                
-                ax.text(xx[(j,i)], yy[(j,i)], 
-                        s=f"{int(grid_bmus[j,i])}", 
-                        size = fontsize,
-                        horizontalalignment='center', 
-                        verticalalignment='center', 
-                        color='black')
-        
-        plt.title("Neurons Template", size=title_size)
-        
-        # Limites de Plotagem e eixos
-        plt.xlim(-0.5, self.mapsize[0]+0.5)
-        plt.ylim(-0.5660254, self.mapsize[1]*0.8660254+2*0.560254)
-        ax.set_axis_off()
-        plt.gca().invert_yaxis()
-        
+        # Preserve the alternating historical template appearance while
+        # generating colors vectorially.
+        norm = mpl.colors.Normalize(
+            vmin=0,
+            vmax=1,
+        )
+        cmap = mpl.colormaps["Pastel1"]
+        base = np.where(
+            col_ids % 2 == 0,
+            0.2,
+            0.6,
+        )
+        colors = cmap(
+            norm(base)
+        )
+        colors[:, 3] = np.where(
+            row_ids % 2 == 0,
+            0.3,
+            0.8,
+        )
+
+        fig, ax = plt.subplots(
+            figsize=figsize,
+            dpi=300,
+        )
+        ax.set_aspect("equal")
+
+        self._add_solid_cells(
+            ax,
+            centers,
+            facecolors=colors,
+            edgecolors="gray",
+            linewidths=0.6,
+            zorder=1,
+        )
+
+        for node_id, (
+            x,
+            y,
+        ) in zip(
+            node_ids,
+            centers,
+        ):
+            ax.text(
+                x,
+                y,
+                str(node_id),
+                size=fontsize,
+                ha="center",
+                va="center",
+                color="black",
+                zorder=2,
+            )
+
+        ax.set_title(
+            "Neurons Template",
+            size=title_size,
+        )
+
+        self._set_map_limits(
+            ax,
+            centers,
+            pad=0.7,
+            invert_y=True,
+        )
+
         if save:
-            if file_path:
-                f.savefig(f"{file_path}/{file_name}_neurons_template.jpg",dpi=300, bbox_inches = "tight")
-            else:
-                path = 'Plots/Neurons_template'
-                os.makedirs(path, exist_ok=True)
+            path = (
+                str(file_path)
+                if file_path
+                else "Plots/Neurons_template"
+            )
+            os.makedirs(
+                path,
+                exist_ok=True,
+            )
+            fig.savefig(
+                os.path.join(
+                    path,
+                    f"{file_name}_neurons_template.jpg",
+                ),
+                dpi=300,
+                bbox_inches="tight",
+            )
 
-                f.savefig(f"Plots/Neurons_template/{file_name}_neurons_template.jpg",dpi=300, bbox_inches = "tight")
+        return fig
 
-    def generate_rec_lattice(self, n_columns, n_rows):
+    # ------------------------------------------------------------------
+    # LATTICE GENERATION
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def generate_rec_lattice(
+        n_columns,
+        n_rows,
+    ):
         """
-        Generates the xy coordinates of the BMUs for a rectangular grid.
+        Generate rectangular lattice coordinates.
 
-        Args:
-            n_rows: Number of lines in the kohonen map.
-            n_columns: Number of columns in the kohonen map.
+        Parameters
+        ----------
+        n_columns : int
+            Number of map columns.
+        n_rows : int
+            Number of map rows.
 
-        Returns:
-            Coordinates of the [x,y] format for the BMUs in a rectangular grid.
-
+        Returns
+        -------
+        ndarray, shape (n_rows * n_columns, 2)
+            Coordinates in [x, y] order, flattened row-major.
         """
-        x_coord = []
-        y_coord = []
-        for j in range(n_rows):
-            for i in range(n_columns):
-                x_coord.append(i)
-                y_coord.append(j)
-        coordinates = np.column_stack([x_coord, y_coord])
-        return coordinates
+        n_columns = int(n_columns)
+        n_rows = int(n_rows)
+
+        coord_x, coord_y = np.meshgrid(
+            np.arange(
+                n_columns,
+                dtype=float,
+            ),
+            np.arange(
+                n_rows,
+                dtype=float,
+            ),
+            indexing="xy",
+        )
+
+        return np.column_stack(
+            [
+                coord_x.ravel(),
+                coord_y.ravel(),
+            ]
+        )
+
+    @staticmethod
+    def generate_hex_lattice(
+        n_columns,
+        n_rows,
+    ):
+        """
+        Generate odd-r hexagonal lattice coordinates.
+
+        Parameters
+        ----------
+        n_columns : int
+            Number of map columns.
+        n_rows : int
+            Number of map rows.
+
+        Returns
+        -------
+        ndarray, shape (n_rows * n_columns, 2)
+            Coordinates in [x, y] order, flattened row-major.
+        """
+        n_columns = int(n_columns)
+        n_rows = int(n_rows)
+
+        ratio = (
+            np.sqrt(3.0) / 2.0
+        )
+
+        coord_x, coord_y = np.meshgrid(
+            np.arange(
+                n_columns,
+                dtype=float,
+            ),
+            np.arange(
+                n_rows,
+                dtype=float,
+            ),
+            indexing="xy",
+        )
+
+        coord_y *= ratio
+        coord_x[
+            1::2,
+            :
+        ] += 0.5
+
+        return np.column_stack(
+            [
+                coord_x.ravel(),
+                coord_y.ravel(),
+            ]
+        )
+
+    # ------------------------------------------------------------------
+    # HITS
+    # ------------------------------------------------------------------
 
     @property
     def hits_dictionary(self):
         """
-        Function to create a hits dictionary from the input vectors for
-        each of its BMUs, proportional to the size of the plot.
+        Return hit-size factors indexed by zero-based BMU id.
+
+        The scale remains compatible with the historical visualization:
+        0.5 to 2.0.
         """
-        # Hits count
-        unique, counts = np.unique(self.bmus, return_counts=True)
+        unique, counts = np.unique(
+            self.bmus,
+            return_counts=True,
+        )
 
-        # Normalize this count from 0.5 to 2.0 (from a small hexagon to a
-        # hexagon that covers half of the neighbors).
-        counts = minmax_scale(counts, feature_range = (0.5,2))
+        if counts.size == 0:
+            return {}
 
-        return dict(zip(unique, counts))
+        counts = counts.astype(float)
 
+        cmin = float(
+            np.min(counts)
+        )
+        cmax = float(
+            np.max(counts)
+        )
 
-    def generate_hex_lattice(self, n_columns, n_rows):
+        if np.isclose(
+            cmin,
+            cmax,
+        ):
+            scaled = np.full(
+                counts.shape,
+                0.5,
+                dtype=float,
+            )
+        else:
+            scaled = (
+                0.5
+                + (
+                    counts - cmin
+                )
+                * (
+                    2.0 - 0.5
+                )
+                / (
+                    cmax - cmin
+                )
+            )
+
+        return dict(
+            zip(
+                unique.astype(int),
+                scaled,
+            )
+        )
+
+    # ------------------------------------------------------------------
+    # TORUS
+    # ------------------------------------------------------------------
+
+    def plot_torus(
+        self,
+        inner_out_prop=0.4,
+        red_factor=4,
+        hits=False,
+        n_colors=32,
+        n_training_pixels=5000,
+    ):
         """
-        Generates the xy coordinates of the BMUs for an odd-r hex grid.
-        Args:
-            n_rows: Number of lines in the kohonen map.
-            n_columns: Number of columns in the kohonen map.
+        Draw the U-Matrix as a torus texture.
 
-        Returns:
-            Coordinates in the [x,y] format for the BMUs in a hexagonal grid.
-
+        Works for non-square maps and both lattice types because the texture
+        is produced from a seamless periodic rendering of the current map.
         """
-        ratio = np.sqrt(3) / 2
+        if red_factor <= 0:
+            raise ValueError(
+                "red_factor must be greater than zero."
+            )
 
-        coord_x, coord_y = np.meshgrid(np.arange(n_columns),
-                                       np.arange(n_rows), 
-                                       sparse=False, 
-                                       indexing='xy')
-        coord_y = coord_y * ratio
-        coord_x = coord_x.astype(float)
-        coord_x[1::2, :] += 0.5
-        coord_x = coord_x.ravel()
-        coord_y = coord_y.ravel()
+        mat_im = self.plot_umatrix(
+            figsize=(10, 10),
+            hits=hits,
+            save=False,
+            resume=True,
+        )
 
-        coordinates = np.column_stack([coord_x, coord_y])
+        y_res = max(
+            2,
+            int(
+                mat_im.shape[0]
+                / red_factor
+            ),
+        )
+        x_res = max(
+            2,
+            int(
+                mat_im.shape[1]
+                / red_factor
+            ),
+        )
 
-        return coordinates
+        # Keep the texture orientation stable without tying it to
+        # mapsize[0]/mapsize[1].
+        if (
+            mat_im.shape[0]
+            > mat_im.shape[1]
+        ):
+            mat_im = rotate(
+                mat_im,
+                90,
+                reshape=True,
+            )
 
+        mat_res = resize(
+            mat_im,
+            (
+                y_res,
+                x_res,
+            ),
+            preserve_range=True,
+            anti_aliasing=True,
+        )
 
+        if mat_res.dtype != np.uint8:
+            mat_res = np.clip(
+                mat_res,
+                0,
+                255,
+            ).astype(
+                np.uint8
+            )
 
-    def plot_torus(self, inner_out_prop = 0.4, red_factor = 4, hits=False):
-        """
-        Returns the (x, y, z) corrdinates for drawing a toroid.
-        
-        Args:
-        - rows (int): number of grid rows.
-        - cols (int): number of grid columns.
-        - aspect_ratio (float): proportion between the width and height of the image.
-        - R_scale (float): external radius scale of toroid. Default: 0.4.
+        def torus(
+            rows,
+            cols,
+            aspect_ratio,
+            R_scale=0.4,
+        ):
+            r_scale = (
+                R_scale
+                * aspect_ratio
+                * inner_out_prop
+            )
 
-        Returns:
-        (x, y, z) coordinates for drawing a toroid.
-        """
+            u, v = np.meshgrid(
+                np.linspace(
+                    0,
+                    2 * pi,
+                    cols,
+                ),
+                np.linspace(
+                    0,
+                    2 * pi,
+                    rows,
+                ),
+            )
 
-        mat_im = self.plot_umatrix(figsize = (10,10), 
-                                       hits = True if hits else False, 
-                                       save = True, 
-                                       file_name = None,
-                                       file_path = False, 
-                                       resume=True)
-            
-        # Toroid Resolution
-        y_res = int(mat_im.shape[0]/red_factor)
-        x_res = int(mat_im.shape[1]/red_factor)
-
-        if mat_im.shape[0] > mat_im.shape[1]:
-            mat_im = rotate(mat_im, 90)
-
-        # Reduce image
-        mat_res = (resize(mat_im, (y_res, x_res))*256).astype(int)
-
-        def torus(rows, cols, aspect_ratio, R_scale=0.4):
-            r_scale = R_scale * aspect_ratio * inner_out_prop
-            u, v = np.meshgrid(np.linspace(0, 2*pi, cols), np.linspace(0, 2*pi, rows))
-            return (R_scale+r_scale*np.sin(v))*np.cos(u), (R_scale+r_scale*np.sin(v))*np.sin(u), r_scale*np.cos(v)
-
+            return (
+                (
+                    R_scale
+                    + r_scale * np.sin(v)
+                )
+                * np.cos(u),
+                (
+                    R_scale
+                    + r_scale * np.sin(v)
+                )
+                * np.sin(u),
+                r_scale * np.cos(v),
+            )
 
         r, c, _ = mat_res.shape
-        aspect_ratio = mat_im.shape[1]/mat_im.shape[0]
-        x, y, z = torus(r, c, aspect_ratio, R_scale=0.4)
-        I, J, K, tri_color_intensity, pl_colorscale = self.mesh_data(mat_res, n_colors=32, n_training_pixels=10000) 
-        fig5 = go.Figure()
-        fig5.add_mesh3d(x=x.flatten(), y=y.flatten(), z=np.flipud(z).flatten(),  
-                                    i=I, j=J, k=K, intensity=tri_color_intensity, intensitymode="cell", 
-                                    colorscale=pl_colorscale, showscale=False)
-        
-        scene_style = dict(scene=dict(xaxis_visible=False, yaxis_visible=False, zaxis_visible=False),
-                   scene_aspectmode="data")
-        
-        fig5.update_layout(width=700, height=700,
-                        margin=dict(t=10, r=10, b=10, l=10),
-                        scene_camera_eye=dict(x=-1.75, y=-1.75, z=1), 
-                        **scene_style)
-        fig5.show()
 
+        aspect_ratio = (
+            mat_res.shape[1]
+            / mat_res.shape[0]
+        )
 
-    def mesh_data(self, img, n_colors=32, n_training_pixels=800):
-        rows, cols, _ = img.shape
-        z_data, pl_colorscale = self.image2zvals(img, n_colors=n_colors, n_training_pixels=n_training_pixels)
-        triangles = self.regular_tri(rows, cols) 
+        x, y, z = torus(
+            r,
+            c,
+            aspect_ratio,
+            R_scale=0.4,
+        )
+
+        (
+            I,
+            J,
+            K,
+            tri_color_intensity,
+            pl_colorscale,
+        ) = self.mesh_data(
+            mat_res,
+            n_colors=n_colors,
+            n_training_pixels=n_training_pixels,
+        )
+
+        fig = go.Figure()
+
+        fig.add_mesh3d(
+            x=x.ravel(),
+            y=y.ravel(),
+            z=np.flipud(z).ravel(),
+            i=I,
+            j=J,
+            k=K,
+            intensity=tri_color_intensity,
+            intensitymode="cell",
+            colorscale=pl_colorscale,
+            showscale=False,
+        )
+
+        fig.update_layout(
+            width=700,
+            height=700,
+            margin=dict(
+                t=10,
+                r=10,
+                b=10,
+                l=10,
+            ),
+            scene_camera_eye=dict(
+                x=-1.75,
+                y=-1.75,
+                z=1,
+            ),
+            scene=dict(
+                xaxis_visible=False,
+                yaxis_visible=False,
+                zaxis_visible=False,
+            ),
+            scene_aspectmode="data",
+        )
+
+        fig.show()
+        return fig
+
+    def mesh_data(
+        self,
+        img,
+        n_colors=32,
+        n_training_pixels=800,
+    ):
+        """
+        Convert an RGB image to triangle indices and color intensities.
+        """
+        (
+            z_data,
+            pl_colorscale,
+        ) = self.image2zvals(
+            img,
+            n_colors=n_colors,
+            n_training_pixels=n_training_pixels,
+        )
+
+        rows, cols = z_data.shape
+
+        triangles = self.regular_tri(
+            rows,
+            cols,
+        )
+
         I, J, K = triangles.T
-        zc = z_data.flatten()[triangles] 
-        tri_color_intensity = [zc[k][2] if k%2 else zc[k][1] for k in range(len(zc))]  
-        return I, J, K, tri_color_intensity, pl_colorscale
-    
-    def regular_tri(self, rows, cols):
-        #define triangles for a np.meshgrid(np.linspace(a, b, cols), np.linspace(c,d, rows))
-        triangles = []
-        for i in range(rows-1):
-            for j in range(cols-1):
-                k = j+i*cols
-                triangles.extend([[k,  k+cols, k+1+cols], [k, k+1+cols, k+1]])
-        return np.array(triangles) 
-    
-    def image2zvals(self, img,  n_colors=64, n_training_pixels=800, rngs = 123): 
-        # Image color quantization
-        # img - np.ndarray of shape (m, n, 3) or (m, n, 4)
-        # n_colors: int,  number of colors for color quantization
-        # n_training_pixels: int, the number of image pixels to fit a KMeans instance to them
-        # returns the array of z_values for the heatmap representation, and a plotly colorscale
-    
+
+        flattened = z_data.ravel()
+        zc = flattened[
+            triangles
+        ]
+
+        parity = (
+            np.arange(
+                zc.shape[0]
+            )
+            % 2
+        )
+
+        tri_color_intensity = np.where(
+            parity == 0,
+            zc[:, 1],
+            zc[:, 2],
+        )
+
+        return (
+            I,
+            J,
+            K,
+            tri_color_intensity,
+            pl_colorscale,
+        )
+
+    @staticmethod
+    def regular_tri(
+        rows,
+        cols,
+    ):
+        """
+        Vectorized triangulation of a regular rows x cols grid.
+        """
+        rows = int(rows)
+        cols = int(cols)
+
+        if rows < 2 or cols < 2:
+            return np.empty(
+                (
+                    0,
+                    3,
+                ),
+                dtype=int,
+            )
+
+        i = np.arange(
+            rows - 1,
+            dtype=int,
+        )[:, None]
+        j = np.arange(
+            cols - 1,
+            dtype=int,
+        )[None, :]
+
+        k = (
+            j
+            + i * cols
+        ).ravel()
+
+        tri1 = np.column_stack(
+            [
+                k,
+                k + cols,
+                k + cols + 1,
+            ]
+        )
+
+        tri2 = np.column_stack(
+            [
+                k,
+                k + cols + 1,
+                k + 1,
+            ]
+        )
+
+        triangles = np.empty(
+            (
+                tri1.shape[0] * 2,
+                3,
+            ),
+            dtype=int,
+        )
+
+        triangles[
+            0::2
+        ] = tri1
+        triangles[
+            1::2
+        ] = tri2
+
+        return triangles
+
+    @staticmethod
+    def image2zvals(
+        img,
+        n_colors=64,
+        n_training_pixels=800,
+        rngs=123,
+    ):
+        """
+        Quantize image colors using MiniBatchKMeans.
+
+        MiniBatchKMeans is used instead of full KMeans to make torus plotting
+        substantially faster for large textures.
+        """
+        img = np.asarray(img)
+
         if img.ndim != 3:
-            raise ValueError(f"Your image does not appear to  be a color image. It's shape is  {img.shape}")
-        rows, cols, d = img.shape
-        if d < 3:
-            raise ValueError(f"A color image should have the shape (m, n, d), d=3 or 4. Your  d = {d}") 
-            
-        range0 = img[:, :, 0].max() - img[:, :, 0].min()
-        if range0 > 1: #normalize the img values
-            img = np.clip(img.astype(float)/255, 0, 1)
-            
-        observations = img[:, :, :3].reshape(rows*cols, 3)
-        training_pixels = shuffle(observations, random_state=rngs)[:n_training_pixels]
-        model = KMeans(n_clusters=n_colors, random_state=rngs).fit(training_pixels)
-        
+            raise ValueError(
+                "img must be a color image with shape (rows, cols, channels)."
+            )
+
+        rows, cols, channels = img.shape
+
+        if channels < 3:
+            raise ValueError(
+                "A color image must contain at least 3 channels."
+            )
+
+        rgb = img[
+            :,
+            :,
+            :3,
+        ].astype(float)
+
+        if (
+            np.nanmax(rgb)
+            > 1.0
+        ):
+            rgb /= 255.0
+
+        rgb = np.clip(
+            rgb,
+            0.0,
+            1.0,
+        )
+
+        observations = rgb.reshape(
+            rows * cols,
+            3,
+        )
+
+        rng = np.random.default_rng(
+            rngs
+        )
+
+        n_training = min(
+            int(n_training_pixels),
+            observations.shape[0],
+        )
+
+        if n_training <= 0:
+            raise ValueError(
+                "n_training_pixels must be greater than zero."
+            )
+
+        if (
+            n_training
+            < observations.shape[0]
+        ):
+            training_idx = rng.choice(
+                observations.shape[0],
+                size=n_training,
+                replace=False,
+            )
+            training_pixels = observations[
+                training_idx
+            ]
+        else:
+            training_pixels = observations
+
+        n_colors = max(
+            1,
+            min(
+                int(n_colors),
+                training_pixels.shape[0],
+            ),
+        )
+
+        if n_colors == 1:
+            color = np.mean(
+                training_pixels,
+                axis=0,
+            )
+            z_vals = np.zeros(
+                (
+                    rows,
+                    cols,
+                ),
+                dtype=float,
+            )
+            rgb_color = tuple(
+                (
+                    color * 255
+                ).astype(
+                    np.uint8
+                )
+            )
+            return (
+                z_vals,
+                [
+                    [0.0, f"rgb{rgb_color}"],
+                    [1.0, f"rgb{rgb_color}"],
+                ],
+            )
+
+        model = MiniBatchKMeans(
+            n_clusters=n_colors,
+            random_state=rngs,
+            batch_size=min(
+                2048,
+                max(
+                    256,
+                    n_training,
+                ),
+            ),
+            n_init=1,
+        )
+        model.fit(
+            training_pixels
+        )
+
         codebook = model.cluster_centers_
-        indices = model.predict(observations)
-        z_vals = indices.astype(float) / (n_colors-1) #normalization (i.e. map indices to  [0,1])
-        z_vals = z_vals.reshape(rows, cols)
-        # define the Plotly colorscale with n_colors entries    
-        scale = np.linspace(0, 1, n_colors)
-        colors = (codebook*255).astype(np.uint8)
-        pl_colorscale = [[sv, f'rgb{tuple(color)}'] for sv, color in zip(scale, colors)]
-        
-        # Reshape z_vals  to  img.shape[:2]
-        return z_vals.reshape(rows, cols), pl_colorscale
+        indices = model.predict(
+            observations
+        )
+
+        z_vals = (
+            indices.astype(float)
+            / (
+                n_colors - 1
+            )
+        ).reshape(
+            rows,
+            cols,
+        )
+
+        scale = np.linspace(
+            0,
+            1,
+            n_colors,
+        )
+
+        colors = np.clip(
+            codebook * 255,
+            0,
+            255,
+        ).astype(
+            np.uint8
+        )
+
+        pl_colorscale = [
+            [
+                float(scale_value),
+                f"rgb{tuple(color)}",
+            ]
+            for scale_value, color in zip(
+                scale,
+                colors,
+            )
+        ]
+
+        return (
+            z_vals,
+            pl_colorscale,
+        )
+
+    # ------------------------------------------------------------------
+    # SMALL UTILITIES
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _unique_path(
+        filename,
+    ):
+        """
+        Return a non-existing filename by adding _1, _2, ... when needed.
+        """
+        if not os.path.isfile(
+            filename
+        ):
+            return filename
+
+        name, ext = os.path.splitext(
+            filename
+        )
+        counter = 1
+
+        while os.path.isfile(
+            f"{name}_{counter}{ext}"
+        ):
+            counter += 1
+
+        return (
+            f"{name}_{counter}{ext}"
+        )
+
+    @staticmethod
+    def _component_label_name(
+        var_name,
+        *,
+        full_title=False,
+    ):
+        """
+        Build a filesystem-safe default component filename.
+        """
+        var_name = str(
+            var_name
+        )
+
+        if full_title:
+            label_name = (
+                var_name
+                .replace("/", "")
+                .replace("\\", "")
+            )
+        else:
+            label_name = (
+                var_name[:7]
+                .replace(" ", "")
+                .replace(":", "")
+                .replace("/", "")
+                .replace("\\", "")
+            )
+
+        return (
+            label_name
+            if label_name
+            else "component"
+        )
+
+    def _add_watermark_subplot(
+        self,
+        fig,
+        gs,
+        grid_slice=None,
+    ):
+        """
+        Add the IntraSOM watermark if the bundled image is available.
+        """
+        if self.foot is None:
+            return None
+
+        if grid_slice is None:
+            grid_slice = (
+                slice(95, 100),
+                slice(0, 20),
+            )
+
+        row_slice, col_slice = grid_slice
+
+        ax = fig.add_subplot(
+            gs[
+                row_slice,
+                col_slice,
+            ],
+            zorder=-1,
+        )
+        ax.imshow(
+            self.foot,
+            aspect="equal",
+            alpha=1,
+        )
+        ax.axis("off")
+
+        return ax

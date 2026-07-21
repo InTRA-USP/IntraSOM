@@ -1,42 +1,97 @@
-try:
-    from setuptools import setup, find_packages
-except ImportError:
-    from distutils.core import setup
-
-# read the contents of your README file
 from pathlib import Path
+
+from setuptools import find_packages, setup
+
+
+# --------------------------------------------------
+# README
+# --------------------------------------------------
+
 this_directory = Path(__file__).parent
-long_description = (this_directory / "README.md").read_text(encoding="utf-8")
+
+long_description = (
+    this_directory / "README.md"
+).read_text(
+    encoding="utf-8"
+)
+
+
+# --------------------------------------------------
+# PACKAGE
+# --------------------------------------------------
 
 setup(
     name="IntraSOM",
-    version="1.0.5",
-    author="InTRA RDI Center (Universidade de São Paulo)",
+
+    version="1.1.0",
+
+    author=(
+        "InTRA RDI Center "
+        "(Universidade de São Paulo)"
+    ),
+
     author_email="intra@usp.br",
-    description="IntraSOM: Library for Self-Organizing Maps with missing data, hexagonal lattice and toroidal projection",
+
+    description=(
+        "IntraSOM: Library for Self-Organizing Maps "
+        "with missing data, rectangular and hexagonal "
+        "lattices, and planar or toroidal topology"
+    ),
+
     long_description=long_description,
+
     long_description_content_type="text/markdown",
-    keywords="Intrasom SOM Self-Organization Kohonen Non-Supervised U-Matrix",
+
+    keywords=(
+        "IntraSOM SOM Self-Organizing Maps "
+        "Kohonen Unsupervised Learning "
+        "U-Matrix Toroidal Hexagonal Rectangular"
+    ),
+
     packages=find_packages(),
+
+    python_requires=">=3.11",
+
     install_requires=[
-        "matplotlib>=3.7.1",
-        "scipy>=1.10.1",
+
+        # Core numerical stack
+        "numpy>=1.26.4",
+        "scipy>=1.11.4",
+        "pandas>=2.1.4",
+
+        # Machine learning
+        "scikit-learn>=1.4.0",
         "joblib>=1.2.0",
-        "scikit-learn>=1.2.2",
-        "pandas>=2.0.1",
-        "tqdm>=4.65.0",
+
+        # Visualization
+        "matplotlib>=3.8.2",
         "plotly>=5.14.1",
-        "scikit-image>=0.20.0",
-        "pyarrow>=9.0.0",
+        "Pillow>=10.0.0",
+        "scikit-image>=0.22.0",
+
+        # Progress
+        "tqdm>=4.65.0",
+
+        # Data formats
+        "pyarrow>=14.0.2",
         "openpyxl>=3.1.2",
-        "pyarrow >= 9.0.0",
-        "openpyxl >= 3.1.2",
-        "ipywidgets >= 8.0.6",
-        "shapely >= 2.0.1",
-        "geopandas >= 0.13.0",
-        "nbformat >= 5.9.0"
+
+        # Notebook support
+        "ipywidgets>=8.0.6",
+        "nbformat>=5.9.0",
+
+        # Geospatial
+        "shapely>=2.0.2",
+        "geopandas>=0.14.1",
     ],
+
     package_data={
-        'intrasom': ['images/*.jpg', 'images/*.svg', 'images/*.png']
-    }
+        "intrasom": [
+            "images/*.jpg",
+            "images/*.svg",
+            "images/*.png",
+        ]
+    },
+
+    include_package_data=True,
 )
