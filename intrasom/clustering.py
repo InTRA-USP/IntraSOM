@@ -427,6 +427,134 @@ class ClusterFactory(object):
         kmeans = KMeans(n_clusters=k, init=init, n_init=n_init, max_iter=max_iter).fit(self.codebook).labels_+1
 
         return kmeans.reshape(self.mapsize[1], self.mapsize[0])
+
+    def results_cluster(self, clusters, save=True, savetype="parquet"):
+        """Create the sample-level clustering results DataFrame.
+
+        Each input sample inherits the cluster assigned to its BMU.  This is a
+        memory-efficient replacement for the historical implementation: the
+        neuron table is indexed directly by the sample BMUs, without first
+        copying the complete table and inserting the cluster column into that
+        intermediate copy.
+
+        Parameters
+        ----------
+        clusters : numpy.ndarray
+            One- or two-dimensional array containing one cluster label per SOM
+            neuron.  The two-dimensional form returned by :meth:`kmeans` is
+            accepted directly.
+        save : bool, default=True
+            Save the resulting table inside the ``Results`` directory.
+        savetype : {"parquet", "xlsx", "csv"}, default="parquet"
+            Output format used when ``save=True``.
+
+        Returns
+        -------
+        pandas.DataFrame
+            One row per input sample, containing the information of its BMU
+            from ``neurons_dataframe`` and the assigned cluster label.
+        """
+        cluster_array = np.asarray(clusters)
+        expected_neurons = self.rows * self.cols
+
+        if cluster_array.ndim not in (1, 2):
+            raise ValueError(
+                "clusters must be a one- or two-dimensional array. "
+                f"Received an array with {cluster_array.ndim} dimensions."
+            )
+
+        if cluster_array.size != expected_neurons:
+            raise ValueError(
+                "clusters must contain exactly one label per SOM neuron. "
+                f"Received {cluster_array.size} labels for "
+                f"{expected_neurons} neurons."
+            )
+
+        if not np.issubdtype(cluster_array.dtype, np.number):
+            raise TypeError("clusters must contain numeric labels.")
+
+        flat_clusters = cluster_array.reshape(-1)
+        if not np.all(np.isfinite(flat_clusters)):
+            raise ValueError("clusters cannot contain NaN or infinite labels.")
+
+        if not np.all(flat_clusters == np.floor(flat_clusters)):
+            raise ValueError("clusters must contain integer-valued labels.")
+
+        # int32 is sufficient for cluster labels and halves the memory used by
+        # the usual int64 representation in large sample-level result tables.
+        flat_clusters = flat_clusters.astype(np.int32, copy=False)
+
+        bmus = np.asarray(self.bmus, dtype=np.intp).reshape(-1)
+        if bmus.size == 0:
+            raise ValueError("The SOM object does not contain sample BMUs.")
+
+        if np.any((bmus < 0) | (bmus >= expected_neurons)):
+            raise ValueError(
+                "The SOM object contains BMU indices outside the valid range "
+                f"[0, {expected_neurons - 1}]."
+            )
+
+        sample_index = pd.Index(self.sample_names, copy=False)
+        if len(sample_index) != bmus.size:
+            raise ValueError(
+                "sample_names and BMUs must have the same length. "
+                f"Received {len(sample_index)} names and {bmus.size} BMUs."
+            )
+
+        if len(self.neurons_dataframe) != expected_neurons:
+            raise ValueError(
+                "neurons_dataframe is inconsistent with mapsize. "
+                f"Received {len(self.neurons_dataframe)} rows for "
+                f"{expected_neurons} neurons."
+            )
+
+        max_cluster = int(flat_clusters.max())
+        cluster_column = f"{max_cluster}_clusters"
+
+        # Build the final table column by column.  NumPy performs each repeated
+        # BMU lookup directly, while ``copy=False`` lets pandas reuse the
+        # resulting arrays instead of copying the complete sample table again.
+        # The fallback preserves duplicate column names, although the standard
+        # IntraSOM neuron table uses unique names.
+        neuron_df = self.neurons_dataframe
+        if neuron_df.columns.is_unique:
+            result_data = {
+                column: neuron_df[column].to_numpy(copy=False)[bmus]
+                for column in neuron_df.columns
+            }
+            result_data[cluster_column] = flat_clusters[bmus]
+            results_df = pd.DataFrame(
+                result_data,
+                index=sample_index,
+                copy=False,
+            )
+        else:
+            results_df = neuron_df.take(bmus, axis=0)
+            results_df[cluster_column] = flat_clusters[bmus]
+            results_df.index = sample_index
+
+        if save:
+            savetype = str(savetype).lower().lstrip(".")
+            path = "Results"
+            os.makedirs(path, exist_ok=True)
+            file_name = (
+                f"{self.name}_results_{max_cluster}_clusters.{savetype}"
+            )
+            output_path = os.path.join(path, file_name)
+
+            if savetype == "parquet":
+                results_df.to_parquet(output_path)
+            elif savetype == "xlsx":
+                results_df.to_excel(output_path)
+            elif savetype == "csv":
+                results_df.to_csv(output_path)
+            else:
+                raise ValueError(
+                    "savetype must be 'parquet', 'xlsx', or 'csv'. "
+                    f"Received {savetype!r}."
+                )
+
+        return results_df
     
     def Davies_Bouldin_analysis(self, 
                                 max_clust=30, 

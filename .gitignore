@@ -4,3 +4,7 @@ intrasom/__pycache__/
 IntraSOM.egg-info/
 
 tests/.ipynb_checkpoints/
+
+intrasom/.ipynb_checkpoints/
+
+tests/
