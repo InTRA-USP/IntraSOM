@@ -807,17 +807,21 @@ class SOM(object):
         """
         def fix_serialize(obj):
             if isinstance(obj, dict):
-                for key in obj:
-                    obj[key] = fix_serialize(obj[key])
-                return obj
-            elif isinstance(obj, list):
+                return {
+                    key: fix_serialize(value)
+                    for key, value in obj.items()
+                }
+
+            if isinstance(obj, (list, tuple)):
                 return [fix_serialize(item) for item in obj]
-            elif isinstance(obj, tuple):
-                return [fix_serialize(item) for item in obj]
-            elif isinstance(obj, np.int64):
-                return int(obj)
-            else:
-                return obj
+
+            if isinstance(obj, np.ndarray):
+                return fix_serialize(obj.tolist())
+
+            if isinstance(obj, np.generic):
+                return obj.item()
+
+            return obj
             
         # Create the training properties dictionary
         dic = dict()
